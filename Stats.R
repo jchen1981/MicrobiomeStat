@@ -1183,34 +1183,33 @@ subset_dist <- function (dist.obj, samIDs) {
 perform_sequence_stat_analysis <- function (data.obj, ann='') {
 	sink(paste0('Sequence_Analysis_Statistics_', ann, '.txt'))
 	otu.tab <- data.obj$otu.tab
-	
+
 	# Sequencing depth
 	otu.abund <- rowSums(otu.tab)
 	sam.abund <- colSums(otu.tab)
 	otu.prev <- rowSums(otu.tab!=0)/ncol(otu.tab)
-	
+
 	otu.abund <- otu.abund[otu.abund >= 1]
 	sam.abund <- sam.abund[sam.abund >= 1]
 	cat('16S rDNA targeted sequencing yields ', mean(sam.abund), 'reads/sample on average (range:', min(sam.abund), '-', max(sam.abund), ').')
 	cat('Clustering of these 16S sequence tags produces ', sum(otu.abund > 0), ' OTUs at 97% similarity level.')
-	
-	pdf(paste0('Sequence_Analysis_Statistics_', ann, '.pdf'), height=5, width=5)
+
+	png(paste0('Sequence_Analysis_Statistics_', ann, '.png'), height=600, width=900)
 	obj <- ggplot2::ggplot(data=data.frame(x=otu.abund), aes(x=x)) + geom_histogram(col='black', fill='gray') + ylab('Frequency') + xlab('Abundance(Total counts)') +
-			scale_x_log10(breaks=c(1, 10, 100, 1000, 10000, 100000, 100000))
-	print(obj)
-	obj <- ggplot2::ggplot(data=data.frame(x=sam.abund), aes(x=x)) + geom_histogram(col='black', fill='gray')  + ylab('Frequency') + xlab('Sequencing depth')
-	print(obj)
-	obj <- ggplot2::ggplot(data=data.frame(x=otu.prev), aes(x=x))  + ylab('Frequency') + xlab('Prevalence(Occurence frequency)') + geom_histogram(col='black', fill='gray')
-	print(obj)
+		scale_x_log10(breaks=c(1, 10, 100, 1000, 10000, 100000, 100000))
+	obj2 <- ggplot2::ggplot(data=data.frame(x=sam.abund), aes(x=x)) + geom_histogram(col='black', fill='gray')  + ylab('Frequency') + xlab('Sequencing depth')
+	obj3 <- ggplot2::ggplot(data=data.frame(x=otu.prev), aes(x=x))  + ylab('Frequency') + xlab('Prevalence(Occurence frequency)') + geom_histogram(col='black', fill='gray')
+	multiplot(obj,obj2,obj3, cols=1)
 	dev.off()
-	
+
 	phy.abund <- data.obj$abund.list[['Phylum']]
 	fam.abund <- data.obj$abund.list[['Family']]
 	gen.abund <- data.obj$abund.list[['Genus']]
-	
+
 	phy.prev <- rowSums(phy.abund != 0) / ncol(phy.abund)
 	fam.prev <- rowSums(fam.abund != 0) / ncol(phy.abund)
 	gen.prev <- rowSums(gen.abund != 0) / ncol(phy.abund)
+
 	
 	phy.abund <- rowMeans(t(t(phy.abund) / sam.abund))
 	fam.abund <- rowMeans(t(t(fam.abund) / sam.abund))
@@ -1243,6 +1242,14 @@ perform_sequence_stat_analysis <- function (data.obj, ann='') {
 	cat('\nThe most abundant phyla are ', paste(paste0(names(phy.abund), '(', phy.abund, '%)'), collapse=' '), ';')
 	cat('\nThe most abundant families are ', paste(paste0(names(fam.abund), '(', fam.abund, '%)'), collapse=' '), ';')
 	cat('\nand the most abundant genera are ', paste(paste0(names(gen.abund), '(', gen.abund, '%)'), collapse=' '), '.')
+	sink()
+	sink(paste0('Sequence_Analysis_Statistics_table_', ann, '.tsv'))
+	write.table(cbind(read.table(text=names(phy.prev)), unname(phy.prev), "Phylum", "Prevalence"), row.names=FALSE, col.names=FALSE)
+	write.table(cbind(read.table(text=names(fam.prev)), unname(fam.prev), "Family", "Prevalence"), row.names=FALSE, col.names=FALSE)
+	write.table(cbind(read.table(text=names(gen.prev)), unname(gen.prev), "Genus", "Prevalence"), row.names=FALSE, col.names=FALSE)
+	write.table(cbind(read.table(text=names(phy.abund)), unname(phy.abund), "Phylum", "Abundance"), row.names=FALSE, col.names=FALSE)
+	write.table(cbind(read.table(text=names(fam.abund)), unname(fam.abund), "Family", "Abundance"), row.names=FALSE, col.names=FALSE)
+	write.table(cbind(read.table(text=names(gen.abund)), unname(gen.abund), "Genus", "Abundance"), row.names=FALSE, col.names=FALSE)
 	sink()
 }
 
@@ -1443,62 +1450,52 @@ generate_alpha_boxplot <- function (data.obj, phylo.obj, rarefy=TRUE, depth=NULL
 			if (depth > min(sample_sums(phylo.obj))) {
 				ind <- (sample_sums(phylo.obj) >= depth)
 				cat(sum(!ind), " samples do not have sufficient number of reads!\n")
-				
-				sample_data(phylo.obj) <- sample_data(phylo.obj)[ind, ] 
+				sample_data(phylo.obj) <- sample_data(phylo.obj)[ind, ]
 				data.obj <- subset_data(data.obj, ind)
 			}
 		}
-
 		phylo.even <- rarefy_even_depth(phylo.obj, depth, rngseed=12345)
-		x <- estimate_richness(phylo.even, measures=measures)
+		est_rich <- estimate_richness(phylo.even, measures=measures)
 	} else {
-		x <- estimate_richness(phylo.obj, measures=measures)
-	}
-	
+		est_rich <- estimate_richness(phylo.obj, measures=measures)
+	} 
+  
 	df <- data.obj$meta.dat
 	grp <- df[, grp.name]
-	
+  
 	hei <- 5
 	if (is.null(strata)) {
 		wid <- 5
-	} else {
+	} else { 
 		wid <- 5.5
-	}
+	} 
 	if (rarefy == T) {
-		pdf(paste0('Alpha_diversity_boxplot_rarefied.pdf'), height=hei, width=wid)
+		png(paste0('Alpha_diversity_boxplot_rarefied.png'), height=600, width=900)
 	} else {
 		pdf(paste0('Alpha_diversity_boxplot_unrarefied.pdf'), height=hei, width=wid)
 	}
+	obj_list <- list()
 	
 	if (is.null(strata)) {
-		for (measure in measures) {
-			cat(measure, '\n')
-			xx <- x[, measure]		
-			df2 <- data.frame(Value=xx, Group=grp)
-			dodge <- position_dodge(width=0.75)
-			obj <- ggplot(df2, aes(x=Group, y=Value, col=Group)) +
-					geom_boxplot(position=dodge,  outlier.colour = NA) + 
-					geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) +
-					labs(y=measure) +
-					theme(legend.position="none")
-			print(obj)
-		}	
+		df = data.frame(Value=est_rich[, measures], Group=grp)
+		mdf <- melt(df)
+		obj <- ggplot(mdf, aes(x=Group, y=value, col=Group)) + geom_boxplot(position=position_dodge(width=0.75), outlier.colour = NA) +
+		geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) + labs(y="Alpha Diversity") + facet_wrap(~ variable, scale="free_y")
+		print(obj)
 	} else {
 		for (measure in measures) {
 			cat(measure, '\n')
-			xx <- x[, measure]		
+			xx <- x[, measure]
 			grp2 <- df[, strata]
 			df2 <- data.frame(Value=xx, Group=grp, Strata=grp2)
-			
 			dodge <- position_dodge(width=0.95)
-			obj <- ggplot(df2, aes(x=Strata, y=Value, col=Group)) +
-					geom_boxplot(position=dodge,  outlier.colour = NA) + 
-					geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) +
-					labs(y=measure, x=strata) 
-			print(obj)
+			obj_list[[measure]] <- ggplot(df2, aes(x=Strata, y=Value, col=Group)) +
+			geom_boxplot(position=dodge,  outlier.colour = NA) + 
+			geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) +
+			labs(y=measure, x=strata) 
 		}
-		
-	}
+		multiplot(plotlist=obj_list, cols=2)
+  	}
 	dev.off()
 }
 
@@ -5127,5 +5124,4 @@ perform_power_analysis <- function (data.obj, dist.obj, dist.names=c('UniFrac', 
 	
 	return(pvdf)
 }
-
 
