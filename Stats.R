@@ -1482,6 +1482,26 @@ generate_alpha_boxplot <- function (data.obj, phylo.obj, rarefy=TRUE, depth=NULL
 		obj <- ggplot(mdf, aes(x=Group, y=value, col=Group)) + geom_boxplot(position=position_dodge(width=0.75), outlier.colour = NA) +
 		geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) + labs(y="Alpha Diversity") + facet_wrap(~ variable, scale="free_y")
 		print(obj)
+		dev.off()
+
+		if (rarefy == T) {
+                	pdf(paste0('Alpha_diversity_boxplot_rarefied.pdf'), height=hei, width=wid)
+		} else {
+                	pdf(paste0('Alpha_diversity_boxplot_unrarefied.pdf'), height=hei, width=wid)
+        	}
+		for (measure in measures) {
+			cat(measure, '\n')
+			xx <- est_rich[, measure]		
+			df2 <- data.frame(Value=xx, Group=grp)
+			dodge <- position_dodge(width=0.75)
+			obj <- ggplot(df2, aes(x=Group, y=Value, col=Group)) +
+					geom_boxplot(position=dodge,  outlier.colour = NA) + 
+					geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) +
+					labs(y=measure) +
+					theme(legend.position="none")
+			print(obj)
+		}	
+
 	} else {
 		for (measure in measures) {
 			cat(measure, '\n')
