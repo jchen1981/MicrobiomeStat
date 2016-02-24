@@ -1342,7 +1342,7 @@ generate_rarefy_curve <- function (data.obj, phylo.obj, grp.name, depth=NULL, np
 	}
 	colnames(res) <- rownames(df)
 	sink()
-	
+	res_list <- list()
 	pdf(paste0("Alpha_diversity_Rarefaction_Curve_", ann, ".pdf"), width=5, height=5)
 	for (i in 1:length(measures)) {
 		measure <- measures[i]
@@ -1371,8 +1371,22 @@ generate_rarefy_curve <- function (data.obj, phylo.obj, grp.name, depth=NULL, np
 				geom_point(size=3, shape=21, fill="white") +
 				labs(y=measure) +
 				theme(legend.justification=c(1,0), legend.position=c(1,0))
-		print(obj)		
+		print(obj)
+    res_list[[measure]] <- res2
+    res2
 	}
+  dev.off()
+	png(paste0("Alpha_diversity_Rarefaction_Curve_", ann, ".png"), width=900, height=600)
+  mres_list = melt(res_list, measure.vars=c("mean", "max", "min"))
+	cres_list <- cast(mres_list, L1 + Group + Depth ~ variable, fun.aggregate=mean)
+	obj <- ggplot(cres_list, aes(x=Depth, y=mean, color=Group, group=Group)) +
+    geom_errorbar(aes(ymin=min, ymax=max), alpha=0.5, width=.25, position=position_dodge(.2)) + 
+	  geom_line() + 
+	  geom_point(size=3, shape=21, fill="white") +
+	  labs(y="Alpha diversity") +
+	  #theme(legend.justification=c(1,0), legend.position=c(1,0)) + 
+    facet_wrap(~ L1, scale="free_y")
+  print(obj)
 	dev.off()
 }
 
