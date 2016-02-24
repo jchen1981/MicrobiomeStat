@@ -537,7 +537,7 @@ heatmap.3 <- function(x,
 }
 
 load_package <- function (package.names=c('MASS', 'ggbiplot', 'vegan', 'pscl', 'glmmADMB', 'aod', 'nlme', 'MiRKAT', 'matrixStats', 'gplots', 'scales', 'ggplot2', 'GUniFrac', 'rpart', 'qvalue', 'DESeq2',
-				'phangorn', 'phyloseq', 'RColorBrewer', 'squash', 'rhdf5', 'biom', 'reshape', 'randomForest', 'Boruta', 'ade4')) {
+				'phangorn', 'phyloseq', 'RColorBrewer', 'squash', 'rhdf5', 'biom', 'reshape', 'randomForest', 'Boruta', 'ade4', 'Daim')) {
 	for (package.name in package.names) {
 		require(package.name, character.only=T)
 	}
@@ -2427,27 +2427,48 @@ generate_taxa_boxplot <- function (data.obj,  grp.name, strata=NULL, scale='P', 
 	grp <- df[, grp.name]
 	
 	for (LOI in taxa.levels) {
-		cat(LOI, "\n")
-		prop <- data.obj$abund.list[[LOI]]
-		if (scale == 'logP') {
-			prop <- prop + 0.5
-		} 
-		
-		prop <- t(t(prop) / colSums(prop))
-		
-		headnames <- sapply(strsplit(rownames(prop), ";"), paste, collapse="\n")
-		names(headnames) <- rownames(prop)
-		
-		if (taxa.name == 'All') {
-			prop <- prop[rowMaxs(prop) > minp & rowSums(prop!=0) > prev*ncol(prop), , drop=FALSE]
+		if (LOI == 'All') {
+			if (taxa.name == 'All') stop('Taxa names are not required to be all when taxa level is also all!\n')
+			headnames <- NULL
+			prop <- NULL
+			for (LOI2 in names(data.obj$abund.list)) {
+				prop2 <- data.obj$abund.list[[LOI2]]
+				taxa.name2 <- taxa.name[taxa.name %in% rownames(prop2)]
+				if (length(taxa.name2) != 0) {
+					if (scale == 'logP') {
+						prop2 <- prop2 + 0.5
+					} 
+					prop2 <- t(t(prop2) / colSums(prop2))			
+					headnames2 <- sapply(strsplit(rownames(prop2), ";"), paste, collapse="\n")
+					names(headnames2) <- rownames(prop2)
+					prop <- rbind(prop, prop2[taxa.name2, , drop=FALSE])
+					headnames <- c(headnames, headnames2)
+				}
+			}
+			
 		} else {
-			prop <- prop[taxa.name, , drop=FALSE]
+			cat(LOI, "\n")
+			prop <- data.obj$abund.list[[LOI]]
+			if (scale == 'logP') {
+				prop <- prop + 0.5
+			} 
+			prop <- t(t(prop) / colSums(prop))
+			
+			headnames <- sapply(strsplit(rownames(prop), ";"), paste, collapse="\n")
+			names(headnames) <- rownames(prop)
+			
+			if (taxa.name == 'All') {
+				prop <- prop[rowMaxs(prop) > minp & rowSums(prop!=0) > prev*ncol(prop), , drop=FALSE]
+			} else {
+				prop <- prop[taxa.name, , drop=FALSE]
+			}
+			
 		}
 		
 		if (scale == 'logP') {
 			prop <- log10(prop)
 		}
-
+		
 		if (scale == 'sqrtP') {
 			prop <- sqrt(prop)
 		}
@@ -2503,15 +2524,15 @@ generate_taxa_boxplot <- function (data.obj,  grp.name, strata=NULL, scale='P', 
 					print(obj)
 				} else {
 					df2 <- data.frame(Value=taxon.abund, Group=grp)	
-
+					
 					obj <- ggplot(df2, aes(x=Group, fill=Value)) +
 							geom_bar(width=.5) +
 							labs(y=ylab, title=headnames[taxon]) +
 							theme(legend.title=element_blank())
-
+					
 					print(obj)
 				}
-
+				
 			}	
 		} else {
 			for (taxon in rownames(prop)) {
@@ -2562,21 +2583,42 @@ generate_taxa_scatterplot <- function (data.obj,  grp.name, strata=NULL, scale='
 	grp <- df[, grp.name]
 	
 	for (LOI in taxa.levels) {
-		cat(LOI, "\n")
-		prop <- data.obj$abund.list[[LOI]]
-		if (scale == 'logP') {
-			prop <- prop + 0.5
-		} 
-		
-		prop <- t(t(prop) / colSums(prop))
-		
-		headnames <- sapply(strsplit(rownames(prop), ";"), paste, collapse="\n")
-		names(headnames) <- rownames(prop)
-		
-		if (taxa.name == 'All') {
-			prop <- prop[rowMaxs(prop) > minp & rowSums(prop!=0) > prev*ncol(prop), , drop=FALSE]
+		if (LOI == 'All') {
+			if (taxa.name == 'All') stop('Taxa names are not required to be all when taxa level is also all!\n')
+			headnames <- NULL
+			prop <- NULL
+			for (LOI2 in names(data.obj$abund.list)) {
+				prop2 <- data.obj$abund.list[[LOI2]]
+				taxa.name2 <- taxa.name[taxa.name %in% rownames(prop2)]
+				if (length(taxa.name2) != 0) {
+					if (scale == 'logP') {
+						prop2 <- prop2 + 0.5
+					} 
+					prop2 <- t(t(prop2) / colSums(prop2))			
+					headnames2 <- sapply(strsplit(rownames(prop2), ";"), paste, collapse="\n")
+					names(headnames2) <- rownames(prop2)
+					prop <- rbind(prop, prop2[taxa.name2, , drop=FALSE])
+					headnames <- c(headnames, headnames2)
+				}
+			}
+			
 		} else {
-			prop <- prop[taxa.name, , drop=FALSE]
+			cat(LOI, "\n")
+			prop <- data.obj$abund.list[[LOI]]
+			if (scale == 'logP') {
+				prop <- prop + 0.5
+			} 
+			prop <- t(t(prop) / colSums(prop))
+			
+			headnames <- sapply(strsplit(rownames(prop), ";"), paste, collapse="\n")
+			names(headnames) <- rownames(prop)
+			
+			if (taxa.name == 'All') {
+				prop <- prop[rowMaxs(prop) > minp & rowSums(prop!=0) > prev*ncol(prop), , drop=FALSE]
+			} else {
+				prop <- prop[taxa.name, , drop=FALSE]
+			}
+			
 		}
 		
 		if (scale == 'logP') {
@@ -2633,7 +2675,7 @@ generate_taxa_scatterplot <- function (data.obj,  grp.name, strata=NULL, scale='
 							geom_point() +
 							geom_smooth() +
 							labs(y=ylab, x=grp.name, title=headnames[taxon]) +
-					#		ylim(ylims) +
+							#		ylim(ylims) +
 							theme(legend.position="none")
 					print(obj)
 				} else {
@@ -2979,20 +3021,42 @@ generate_taxa_barplot <- function (data.obj,  grp.name, strata=NULL, scale='P', 
 	grp <- df[, grp.name]
 	
 	for (LOI in taxa.levels) {
-		cat(LOI, "\n")
-		prop <- data.obj$abund.list[[LOI]]
-		if (scale == 'logP') {
-			prop <- prop + 0.5
-		} 
-		prop <- t(t(prop) / colSums(prop))
-		
-		headnames <- sapply(strsplit(rownames(prop), ";"), paste, collapse="\n")
-		names(headnames) <- rownames(prop)
-		
-		if (taxa.name == 'All') {
-			prop <- prop[rowMaxs(prop) > minp & rowSums(prop!=0) > prev*ncol(prop), , drop=FALSE]
+		if (LOI == 'All') {
+			if (taxa.name == 'All') stop('Taxa names are not required to be all when taxa level is also all!\n')
+			headnames <- NULL
+			prop <- NULL
+			for (LOI2 in names(data.obj$abund.list)) {
+				prop2 <- data.obj$abund.list[[LOI2]]
+				taxa.name2 <- taxa.name[taxa.name %in% rownames(prop2)]
+				if (length(taxa.name2) != 0) {
+					if (scale == 'logP') {
+						prop2 <- prop2 + 0.5
+					} 
+					prop2 <- t(t(prop2) / colSums(prop2))			
+					headnames2 <- sapply(strsplit(rownames(prop2), ";"), paste, collapse="\n")
+					names(headnames2) <- rownames(prop2)
+					prop <- rbind(prop, prop2[taxa.name2, , drop=FALSE])
+					headnames <- c(headnames, headnames2)
+				}
+			}
+			
 		} else {
-			prop <- prop[taxa.name, , drop=FALSE]
+			cat(LOI, "\n")
+			prop <- data.obj$abund.list[[LOI]]
+			if (scale == 'logP') {
+				prop <- prop + 0.5
+			} 
+			prop <- t(t(prop) / colSums(prop))
+			
+			headnames <- sapply(strsplit(rownames(prop), ";"), paste, collapse="\n")
+			names(headnames) <- rownames(prop)
+			
+			if (taxa.name == 'All') {
+				prop <- prop[rowMaxs(prop) > minp & rowSums(prop!=0) > prev*ncol(prop), , drop=FALSE]
+			} else {
+				prop <- prop[taxa.name, , drop=FALSE]
+			}
+			
 		}
 		
 		if (scale == 'logP') {
@@ -3067,7 +3131,7 @@ generate_taxa_barplot <- function (data.obj,  grp.name, strata=NULL, scale='P', 
 				for (level in levels(grp2)) {
 					ind <- grp2 %in% level
 					df2 <- data.frame(x=factor(1:length(taxon.abund[ind])), Value=taxon.abund[ind], Group=grp[ind])	
-	
+					
 					dodge <- position_dodge(width=0.99)
 					obj0 <- ggplot(df2, aes(x=x, y=Value, fill=Group)) +
 							geom_bar(position=dodge, stat='identity' ) + 
@@ -3090,6 +3154,7 @@ generate_taxa_barplot <- function (data.obj,  grp.name, strata=NULL, scale='P', 
 		dev.off()
 	}		
 }
+
 
 
 twopart.test <- function(x1, x2, zero.p=0.2) {
@@ -4158,7 +4223,7 @@ visualize_differential_analysis <- function (data.obj, diff.obj,  grp.name=NULL,
 			taxa.name <- rownames(qv.vec)[qv.vec <= cutoff]
 			taxa.name <- taxa.name[!is.na(taxa.name)]
 		}
-
+		
 		if (mt.method == 'raw') {
 			taxa.name <- rownames(pv.vec)[pv.vec <= cutoff]
 			taxa.name <- taxa.name[!is.na(taxa.name)]
@@ -4173,7 +4238,7 @@ visualize_differential_analysis <- function (data.obj, diff.obj,  grp.name=NULL,
 			}
 			prop <- rbind(prop, prop0)
 			# currently using fold change
-		    if (test == 'Para') {
+			if (test == 'Para') {
 				eff <- rbind(eff, fc.vec[taxa.name, , drop=F])
 				eff.lc <- rbind(eff.lc, fc.lc.vec[taxa.name, , drop=F])
 				eff.uc <- rbind(eff.uc, fc.uc.vec[taxa.name, , drop=F])
@@ -4198,7 +4263,7 @@ visualize_differential_analysis <- function (data.obj, diff.obj,  grp.name=NULL,
 				wid1 <- 7 * ifelse(nrow(prop) / 30 < 1, 1, nrow(prop) / 30)
 				hei1 <- 7
 			}
-	
+			
 			if (!is.null(grp.name)) {
 				obj <- taxa_barplot_aggregate(prop, df, grp.name, strata, scale, xsize)
 				pdf(paste("Taxa_DifferentialAbundance_AbundanceBarplot", scale, mt.method, cutoff, ann, ".pdf", sep="_"), height=hei1, width=wid1)
@@ -4209,11 +4274,11 @@ visualize_differential_analysis <- function (data.obj, diff.obj,  grp.name=NULL,
 				pdf(paste("Taxa_DifferentialAbundance_AbundanceBoxplot", scale, mt.method, cutoff, ann, ".pdf", sep="_"), height=hei1, width=wid1)
 				print(obj1)
 				dev.off()
-
+				
 			}
-
+			
 			# currently fold change
-		    if (test == 'Para') {
+			if (test == 'Para') {
 				rownames(eff) <- rownames(eff.lc) <- rownames(eff.uc) <- taxa.names
 				for (k in 1:ncol(eff)) {
 					fold.dat.plot1 <- data.frame(Estimate=eff[, k], LCI=eff.lc[, k], UCI=eff.uc[, k], IV=taxa.names)
@@ -4238,7 +4303,14 @@ visualize_differential_analysis <- function (data.obj, diff.obj,  grp.name=NULL,
 						print(obj)
 						dev.off()	
 					}
-
+					
+					if (eff.type == 'Spearman') {
+						obj <- plot_effect_size(taxa.names2, eff, levels(grp)[1], levels(grp)[2], ylab='Spearman correlation')
+						pdf(paste("Taxa_DifferentialAbundance_LFCBarplot", mt.method, cutoff, ann, ".pdf", sep="_"), height=hei2, width=wid2)
+						print(obj)
+						dev.off()	
+					}
+					
 					if (eff.type == 'logP') {
 						obj <- plot_effect_size(taxa.names2, eff, levels(grp)[1], levels(grp)[2], ylab='-log10(P)')
 						pdf(paste("Taxa_DifferentialAbundance_logPBarplot", mt.method, cutoff, ann, ".pdf", sep="_"), height=hei2, width=wid2)
@@ -4247,20 +4319,25 @@ visualize_differential_analysis <- function (data.obj, diff.obj,  grp.name=NULL,
 					}					
 				}
 			}
-
+			
 			# create heatmp
 #			taxa.names2 <- taxa.names[!grepl('unclassified', taxa.names, ignore.case=T)]
-			
-			if (length(taxa.names) >= 2) {
+			if (!is.null(grp.name)) {
+				
 				generate_taxa_heatmap(data.obj, taxa.levels='All', sam.ord=order(grp), taxa=taxa.names, meta.info=grp.name, Colv=F, dendrogram='row', 
 						ann=paste0(mt.method, '_', cutoff, '_', ann, '_Unclustered'))
 				generate_taxa_heatmap(data.obj, taxa.levels='All', taxa=taxa.names, meta.info=grp.name,  ann=paste0(mt.method, '_', cutoff, '_', ann))
 				generate_taxa_heatmap(data.obj, taxa.levels='All', taxa=taxa.names, meta.info=grp.name,  data.type='R', ann=paste0(mt.method, '_', cutoff, '_Rank_', ann))
 				try(
-				generate_taxa_biplot(data.obj, taxa=taxa.names, trans='sqrt', grp.name, ann=paste0(mt.method, '_', cutoff, '_', ann), varname.size = 1.5)	
-		        )
+						generate_taxa_biplot(data.obj, taxa=taxa.names, trans='sqrt', grp.name, ann=paste0(mt.method, '_', cutoff, '_', ann), varname.size = 1.5)	
+				)	
 			}
-
+		}
+		if (!is.null(grp.name)) {
+			# Individual plots
+			generate_taxa_boxplot(data.obj, grp.name=grp.name, taxa.levels='All', taxa.name=taxa.names, ann=paste0(mt.method, '_', cutoff, '_', ann))
+			generate_taxa_boxplot(data.obj, grp.name=grp.name, taxa.levels='All', taxa.name=taxa.names, scale='binary', ann=paste0(mt.method, '_', cutoff, '_', ann))
+			generate_taxa_barplot(data.obj, grp.name=grp.name, taxa.levels='All', taxa.name=taxa.names, ann=paste0(mt.method, '_', cutoff, '_', ann))
 		}
 	}
 }
@@ -4455,9 +4532,10 @@ createROC <- function (pv.list, lab.list, pos.lab='1', file.name='ROC.pdf') {
 #lab.list <- list(x1=invlogit(pv.list[['x1']]), x2=invlogit(pv.list[['x2']]))
 #createROC(pv.list, lab.list)
 
+
 predictionRF <- function (data.obj,  resp.name, formula=NULL, taxa.level='Species', binary=FALSE, prev=0.1, minp=0.002, B=50, seed=123, 
 		boruta.level=c('Confirmed', 'Tentative'), ann='',...) {
-
+	
 	#sink(paste0("Taxa_RandomForest_", taxa.level, ".txt"))
 	date()
 	response <- data.obj$meta.dat[, resp.name]
@@ -4466,7 +4544,7 @@ predictionRF <- function (data.obj,  resp.name, formula=NULL, taxa.level='Specie
 		adj.var <- unlist(strsplit(unlist(strsplit(formula, '\\s*~\\s*'))[2], '\\s*\\+\\s*'))
 		adj <- data.obj$meta.dat[, adj.var, drop=F]
 	} 
-
+	
 	if (taxa.level == 'Species') {
 		if (taxa.level %in% names(data.obj$abund.list)) {
 			ct <- data.obj$abund.list[[taxa.level]]
@@ -4479,7 +4557,7 @@ predictionRF <- function (data.obj,  resp.name, formula=NULL, taxa.level='Specie
 	} else {
 		ct <- data.obj$abund.list[[taxa.level]]
 	}
-
+	
 	prop <- t(t(ct) / colSums(ct))
 	prop <- prop[rowMaxs(prop) > minp & rowSums(prop!=0) > prev*ncol(prop), , drop=FALSE]
 	prop <- t(prop)
@@ -4488,7 +4566,7 @@ predictionRF <- function (data.obj,  resp.name, formula=NULL, taxa.level='Specie
 		prop <- (prop != 0)
 	}
 	
-    original.names <- colnames(prop)
+	original.names <- colnames(prop)
 	set.seed(seed)
 	
 	if (is.null(formula)) {
@@ -4502,7 +4580,7 @@ predictionRF <- function (data.obj,  resp.name, formula=NULL, taxa.level='Specie
 		roc.list <- list("RF_M"=NULL, "RF_CF"=NULL, "RF_M+CF"=NULL)
 		lab.list <- roc.list
 	}
-
+	
 	
 	colnames(prop) <- gsub(";", "_", colnames(prop))
 	colnames(prop) <- gsub(":", "_", colnames(prop))
@@ -4526,42 +4604,42 @@ predictionRF <- function (data.obj,  resp.name, formula=NULL, taxa.level='Specie
 	for(b in 1:B){
 		if (b %% 50 == 0) cat (".")
 		err <- try({
-			bsample <- sample(1:I, I, replace=T)
-			if (is.factor(response)) {
-				rf1 <- randomForest(x=prop[bsample, ], y=response[bsample], xtest=prop[-bsample, ], ytest=response[-bsample], sampsize=table(response[bsample]), ...)
-				performance[b, "RF_M"] <- mean(response[-bsample]!= rf1$test$predicted)
-				performance[b, "Guess"]<- mean(response[-bsample] != levels(response)[which.max(tabulate(response[bsample]))])
-				roc.list[['RF_M']] <- c(roc.list[['RF_M']], rf1$test$vote[, 1])
-				lab.list[['RF_M']] <- c(lab.list[['RF_M']], response[-bsample])
-				if (!is.null(formula)) {
-					rf2 <- randomForest(x=adj[bsample, ], y=response[bsample], xtest=adj[-bsample, ], ytest=response[-bsample], sampsize=table(response[bsample]), ...)
-					rf3 <- randomForest(x=padj[bsample, ], y=response[bsample], xtest=padj[-bsample, ], ytest=response[-bsample], sampsize=table(response[bsample]), ...)
-					performance[b, "RF_CF"] <- mean(response[-bsample]!= rf2$test$predicted)
-					performance[b, "RF_M+CF"] <- mean(response[-bsample]!= rf3$test$predicted)
-					roc.list[['RF_CF']] <- c(roc.list[['RF_CF']], rf2$test$vote[, 1])
-					roc.list[['RF_M+CF']] <- c(roc.list[['RF_M+CF']], rf3$test$vote[, 1])
-					lab.list[['RF_CF']] <- c(lab.list[['RF_CF']], response[-bsample])
-					lab.list[['RF_M+CF']] <- c(lab.list[['RF_M+CF']], response[-bsample])
-				}
-				
-			} else {
-				rf1 <- randomForest(x=prop[bsample, ], y=response[bsample], xtest=prop[-bsample, ], ytest=response[-bsample], ...)
-				performance[b, "RF_M"] <- mean((response[-bsample] - rf1$test$predicted)^2)
-				performance[b, "Guess"]<- mean((response[-bsample] - mean(response[bsample]))^2)
-				
-				if (!is.null(formula)) {
-					
-					rf2 <- randomForest(x=adj[bsample, ], y=response[bsample], xtest=adj[-bsample, ], ytest=response[-bsample],  ...)
-					rf3 <- randomForest(x=padj[bsample, ], y=response[bsample], xtest=padj[-bsample, ], ytest=response[-bsample],  ...)
-					performance[b, "RF_CF"] <- mean((response[-bsample] - rf2$test$predicted)^2)
-					performance[b, "RF_M+CF"] <- mean((response[-bsample]- rf3$test$predicted)^2)
-				}
-			}
-		})
+					bsample <- sample(1:I, I, replace=T)
+					if (is.factor(response)) {
+						rf1 <- randomForest(x=prop[bsample, ], y=response[bsample], xtest=prop[-bsample, ], ytest=response[-bsample], sampsize=table(response[bsample]), ...)
+						performance[b, "RF_M"] <- mean(response[-bsample]!= rf1$test$predicted)
+						performance[b, "Guess"]<- mean(response[-bsample] != levels(response)[which.max(tabulate(response[bsample]))])
+						roc.list[['RF_M']] <- c(roc.list[['RF_M']], rf1$test$vote[, 1])
+						lab.list[['RF_M']] <- c(lab.list[['RF_M']], response[-bsample])
+						if (!is.null(formula)) {
+							rf2 <- randomForest(x=adj[bsample, ], y=response[bsample], xtest=adj[-bsample, ], ytest=response[-bsample], sampsize=table(response[bsample]), ...)
+							rf3 <- randomForest(x=padj[bsample, ], y=response[bsample], xtest=padj[-bsample, ], ytest=response[-bsample], sampsize=table(response[bsample]), ...)
+							performance[b, "RF_CF"] <- mean(response[-bsample]!= rf2$test$predicted)
+							performance[b, "RF_M+CF"] <- mean(response[-bsample]!= rf3$test$predicted)
+							roc.list[['RF_CF']] <- c(roc.list[['RF_CF']], rf2$test$vote[, 1])
+							roc.list[['RF_M+CF']] <- c(roc.list[['RF_M+CF']], rf3$test$vote[, 1])
+							lab.list[['RF_CF']] <- c(lab.list[['RF_CF']], response[-bsample])
+							lab.list[['RF_M+CF']] <- c(lab.list[['RF_M+CF']], response[-bsample])
+						}
+						
+					} else {
+						rf1 <- randomForest(x=prop[bsample, ], y=response[bsample], xtest=prop[-bsample, ], ytest=response[-bsample], ...)
+						performance[b, "RF_M"] <- mean((response[-bsample] - rf1$test$predicted)^2)
+						performance[b, "Guess"]<- mean((response[-bsample] - mean(response[bsample]))^2)
+						
+						if (!is.null(formula)) {
+							
+							rf2 <- randomForest(x=adj[bsample, ], y=response[bsample], xtest=adj[-bsample, ], ytest=response[-bsample],  ...)
+							rf3 <- randomForest(x=padj[bsample, ], y=response[bsample], xtest=padj[-bsample, ], ytest=response[-bsample],  ...)
+							performance[b, "RF_CF"] <- mean((response[-bsample] - rf2$test$predicted)^2)
+							performance[b, "RF_M+CF"] <- mean((response[-bsample]- rf3$test$predicted)^2)
+						}
+					}
+				})
 		if (inherits(err, "try-error")) {
 			next
 		}
-
+		
 	}
 	cat("\n")
 	if (is.null(formula)) {
@@ -4584,7 +4662,7 @@ predictionRF <- function (data.obj,  resp.name, formula=NULL, taxa.level='Specie
 	dev.off()
 	
 	# ROC curve - only compare to the first level of the factor 
-    if (is.factor(response)) {
+	if (is.factor(response)) {
 		lab.list <- lapply(lab.list, function(x) {
 					y <- factor(x)
 					levels(y) <- levels(response)
@@ -4613,7 +4691,7 @@ predictionRF <- function (data.obj,  resp.name, formula=NULL, taxa.level='Specie
 		write.csv(importance[rev(order(importance$IncNodePurity)), ], 
 				paste0("Taxa_RandomForest_Ranking_IncNodePurity_", taxa.level, '_', ann, ".csv"))
 	}
-
+	
 	
 # Boruta Feature Selection - All subset selection (can't solve the confounding problem)
 	obj.Boruta <- Boruta(padj, response, doTrace = 2)	
@@ -4640,64 +4718,126 @@ predictionRF <- function (data.obj,  resp.name, formula=NULL, taxa.level='Specie
 			taxa.names <- setdiff(taxa.names, adj.var)
 		}
 		
-		if (length(taxa.names) > 1) {
-			generate_taxa_heatmap(data.obj, taxa.levels=taxa.level, taxa=taxa.names,   meta.info=resp.name, width=12,
-					margins=c(5, 15), ann=paste0('BorutaFeatures_P_Confirmed_', ann))
-			generate_taxa_heatmap(data.obj, taxa.levels=taxa.level, taxa=taxa.names,   meta.info=resp.name, width=12, data.type='R',
-					margins=c(5, 15), ann=paste0('BorutaFeatures_R_Comfirmed_', ann))
-			generate_taxa_heatmap(data.obj, taxa.levels=taxa.level, taxa=taxa.names,   meta.info=resp.name, width=12, Colv=F, dendrogram='row', sam.ord=order(response),
-					margins=c(5, 15), ann=paste0('BorutaFeatures_P_Confirmed_Unclusterded_', ann))
-			generate_taxa_heatmap(data.obj, taxa.levels=taxa.level, taxa=taxa.names,   meta.info=resp.name, width=12, data.type='R', Colv=F, dendrogram='row', sam.ord=order(response),
-					margins=c(5, 15), ann=paste0('BorutaFeatures_R_Comfirmed_Unclusterded_', ann))
+		if (length(taxa.names) > 0) {
+			if (length(taxa.names) > 1) {
+				generate_taxa_heatmap(data.obj, taxa.levels=taxa.level, taxa=taxa.names,   meta.info=resp.name, width=12,
+						margins=c(5, 15), ann=paste0('BorutaFeatures_P_Confirmed_', ann))
+				generate_taxa_heatmap(data.obj, taxa.levels=taxa.level, taxa=taxa.names,   meta.info=resp.name, width=12, data.type='R',
+						margins=c(5, 15), ann=paste0('BorutaFeatures_R_Comfirmed_', ann))
+				generate_taxa_heatmap(data.obj, taxa.levels=taxa.level, taxa=taxa.names,   meta.info=resp.name, width=12, Colv=F, dendrogram='row', sam.ord=order(response),
+						margins=c(5, 15), ann=paste0('BorutaFeatures_P_Confirmed_Unclusterded_', ann))
+				generate_taxa_heatmap(data.obj, taxa.levels=taxa.level, taxa=taxa.names,   meta.info=resp.name, width=12, data.type='R', Colv=F, dendrogram='row', sam.ord=order(response),
+						margins=c(5, 15), ann=paste0('BorutaFeatures_R_Comfirmed_Unclusterded_', ann))
+			}
 			
 			if (is.factor(response)) {
 				generate_taxa_boxplot(data.obj, grp.name=resp.name, taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Confirmed_', ann))
 				generate_taxa_boxplot(data.obj, grp.name=resp.name, taxa.levels=taxa.level, taxa.name=taxa.names, scale='binary', ann=paste0('BorutaFeatures_Confirmed_', ann))
 				generate_taxa_barplot(data.obj, grp.name=resp.name, taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Confirmed_', ann))
-				generate_taxa_barplot_aggregate(data.obj, grp.name=resp.name, taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Confirmed_', ann))
-				build.decision.tree(data.obj,  resp.name=resp.name, taxa.level=taxa.level, binary=binary, taxa=taxa.names, ann=paste0('BorutaFeatures_Confirmed_', ann)) 
+				if (length(taxa.names) > 1) {
+					generate_taxa_barplot_aggregate(data.obj, grp.name=resp.name, taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Confirmed_', ann))
+					generate_taxa_boxplot_aggregate(data.obj, grp.name=resp.name, taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Confirmed_', ann))
+					build.decision.tree(data.obj,  resp.name=resp.name, taxa.level=taxa.level, binary=binary, taxa=taxa.names, ann=paste0('BorutaFeatures_Confirmed_', ann)) 
+				}
+				gen <- data.obj$abund.list[[taxa.level]]
+				gen <- t(t(gen) / colSums(gen))
+				dat <- t(gen[taxa.names, ,drop=FALSE])
+				colnames(dat) <- paste0('V', 1:ncol(dat))
+				response2 <- factor(-as.numeric(response)+2)
+				
+				mylr <- function(formula, train, test){
+					model <- randomForest(formula, data=train)
+					x <- predict(model, newdata=test, type='prob')[, 2]
+				}
+				
+				ACC <- Daim(response2 ~., model=mylr, data=as.data.frame(dat), labpos="1",
+						control=Daim.control(method="boot", number=100), cutoff="0.632+")
+				pdf(paste0('BorutaFeatures_Confirmed_ROC_', taxa.level, '_0.632+.pdf'), height=6, width=6)
+				plot(ACC, main='Boruta taxa', method='0.632+', lwd=2)	
+				abline(0, 1, col='black')
+				x <- ACC
+				legend("bottomright", legend = paste("AUC:", 
+								formatC(Daim::auc(x$roc$sens632p, x$roc$spec632p), 
+										digits = max(3, getOption("digits") - 3))),
+						inset = 0.01)
+				dev.off()	
 			} else {
 				data.obj$meta.dat[, paste0(resp.name, '_b')] <- factor(data.obj$meta.dat[, resp.name] < median(data.obj$meta.dat[, resp.name]))
 				levels(data.obj$meta.dat[, paste0(resp.name, '_b')]) <- c('High', 'Low')
 				generate_taxa_boxplot(data.obj, grp.name=paste0(resp.name, '_b'), taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Confirmed_', ann))
 				generate_taxa_boxplot(data.obj, grp.name=paste0(resp.name, '_b'), taxa.levels=taxa.level, taxa.name=taxa.names, scale='binary', ann=paste0('BorutaFeatures_Confirmed_', ann))
 				generate_taxa_barplot(data.obj, grp.name=paste0(resp.name, '_b'), taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Confirmed_', ann))
-				generate_taxa_barplot_aggregate(data.obj, grp.name=paste0(resp.name, '_b'), taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Confirmed_', ann))
+				if (length(taxa.names) > 1) {
+					generate_taxa_barplot_aggregate(data.obj, grp.name=paste0(resp.name, '_b'), taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Confirmed_', ann))
+					generate_taxa_boxplot_aggregate(data.obj, grp.name=paste0(resp.name, '_b'), taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Confirmed_', ann))
+				}
 			}
 		}
 	}
-
+	
 	if ('Tentative' %in% boruta.level) {
 		taxa.names <- original.names[names(obj.Boruta$finalDecision)[obj.Boruta$finalDecision %in% c('Confirmed',  'Tentative')]] 
 		if (!is.null(formula)) {
 			taxa.names <- setdiff(taxa.names, adj.var)
 		}
 		
-		if (length(taxa.names) > 1) {
-			generate_taxa_heatmap(data.obj, taxa.levels=taxa.level, taxa=taxa.names,  meta.info=resp.name, width=12,
-					margins=c(5, 15), ann=paste0('BorutaFeatures_P_Tentative_', ann))
-			generate_taxa_heatmap(data.obj, taxa.levels=taxa.level, taxa=taxa.names,  meta.info=resp.name, width=12, data.type='R',
-					margins=c(5, 15), ann=paste0('BorutaFeatures_R_Tentative_', ann))
+		if (length(taxa.names) > 0) {
 			
-			generate_taxa_heatmap(data.obj, taxa.levels=taxa.level, taxa=taxa.names,  meta.info=resp.name, width=12, Colv=F, dendrogram='row', sam.ord=order(response),
-					margins=c(5, 15), ann=paste0('BorutaFeatures_P_Tentative_Unclustered_', ann))
-			generate_taxa_heatmap(data.obj, taxa.levels=taxa.level, taxa=taxa.names,  meta.info=resp.name, width=12, data.type='R', Colv=F, dendrogram='row', sam.ord=order(response),
-					margins=c(5, 15), ann=paste0('BorutaFeatures_R_Tentative_Unclustered_', ann))
-			
-			if (is.factor(response)) {
+			if (length(taxa.names) > 1)  {
+				generate_taxa_heatmap(data.obj, taxa.levels=taxa.level, taxa=taxa.names,  meta.info=resp.name, width=12,
+						margins=c(5, 15), ann=paste0('BorutaFeatures_P_Tentative_', ann))
+				generate_taxa_heatmap(data.obj, taxa.levels=taxa.level, taxa=taxa.names,  meta.info=resp.name, width=12, data.type='R',
+						margins=c(5, 15), ann=paste0('BorutaFeatures_R_Tentative_', ann))
 				
+				generate_taxa_heatmap(data.obj, taxa.levels=taxa.level, taxa=taxa.names,  meta.info=resp.name, width=12, Colv=F, dendrogram='row', sam.ord=order(response),
+						margins=c(5, 15), ann=paste0('BorutaFeatures_P_Tentative_Unclustered_', ann))
+				generate_taxa_heatmap(data.obj, taxa.levels=taxa.level, taxa=taxa.names,  meta.info=resp.name, width=12, data.type='R', Colv=F, dendrogram='row', sam.ord=order(response),
+						margins=c(5, 15), ann=paste0('BorutaFeatures_R_Tentative_Unclustered_', ann))
+			}
+			
+			if (is.factor(response)) {		
 				generate_taxa_boxplot(data.obj, grp.name=resp.name, taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Tentative_', ann))
 				generate_taxa_boxplot(data.obj, grp.name=resp.name, taxa.levels=taxa.level, taxa.name=taxa.names, scale='binary', ann=paste0('BorutaFeatures_Tentative_', ann))
 				generate_taxa_barplot(data.obj, grp.name=resp.name, taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Tentative_', ann))
-				generate_taxa_barplot_aggregate(data.obj, grp.name=resp.name, taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Tentative_', ann))
-				build.decision.tree(data.obj,  resp.name=resp.name, taxa.level=taxa.level, binary=binary, taxa=taxa.names, ann=paste0('BorutaFeatures_Tentative_', ann)) 
+				if (length(taxa.names) > 1) {
+					generate_taxa_barplot_aggregate(data.obj, grp.name=resp.name, taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Tentative_', ann))
+					generate_taxa_boxplot_aggregate(data.obj, grp.name=resp.name, taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Tentative_', ann))
+					build.decision.tree(data.obj,  resp.name=resp.name, taxa.level=taxa.level, binary=binary, taxa=taxa.names, ann=paste0('BorutaFeatures_Tentative_', ann)) 
+				}
+				
+				gen <- data.obj$abund.list[[taxa.level]]
+				gen <- t(t(gen) / colSums(gen))
+				dat <- t(gen[taxa.names, ,drop=FALSE])
+				colnames(dat) <- paste0('V', 1:ncol(dat))
+				response2 <- factor(-as.numeric(response)+2)
+				
+				mylr <- function(formula, train, test){
+					model <- randomForest(formula, data=train)
+					x <- predict(model, newdata=test, type='prob')[, 2]
+				}
+				
+				ACC <- Daim(response2 ~., model=mylr, data=as.data.frame(dat), labpos="1",
+						control=Daim.control(method="boot", number=100), cutoff="0.632+")
+				pdf(paste0('BorutaFeatures_Tentative_ROC_', taxa.level, '_0.632+.pdf'), height=6, width=6)
+				plot(ACC, main='Boruta taxa', method='0.632+', lwd=2)	
+				abline(0, 1, col='black')
+				x <- ACC
+				legend("bottomright", legend = paste("AUC:", 
+								formatC(Daim::auc(x$roc$sens632p, x$roc$spec632p), 
+										digits = max(3, getOption("digits") - 3))),
+						inset = 0.01)
+				dev.off()	
+				
 			} else {
 				data.obj$meta.dat[, paste0(resp.name, '_b')] <- factor(data.obj$meta.dat[, resp.name] < median(data.obj$meta.dat[, resp.name]))
 				levels(data.obj$meta.dat[, paste0(resp.name, '_b')]) <- c('High', 'Low')
 				generate_taxa_boxplot(data.obj, grp.name=paste0(resp.name, '_b'), taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Tentative_', ann))
 				generate_taxa_boxplot(data.obj, grp.name=paste0(resp.name, '_b'), taxa.levels=taxa.level, taxa.name=taxa.names, scale='binary', ann=paste0('BorutaFeatures_Tentative_', ann))
 				generate_taxa_barplot(data.obj, grp.name=paste0(resp.name, '_b'), taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Tentative_', ann))
-				generate_taxa_barplot_aggregate(data.obj, grp.name=paste0(resp.name, '_b'), taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Tentative_', ann))
+				if (length(taxa.names) > 1) {
+					generate_taxa_barplot_aggregate(data.obj, grp.name=paste0(resp.name, '_b'), taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Tentative_', ann))
+					generate_taxa_boxplot_aggregate(data.obj, grp.name=paste0(resp.name, '_b'), taxa.levels=taxa.level, taxa.name=taxa.names, ann=paste0('BorutaFeatures_Tentative_', ann))
+				}
 			}
 		}
 	}	
