@@ -1680,6 +1680,84 @@ generate_ordination <- function (data.obj, dist.obj, dist.names=c('UniFrac', 'GU
 	}
 }
 
+#Note: this function is NOT general purpose like generate_ordination()
+generate_ordination2 <- function (data.obj, dist.obj, dist.names=c('UniFrac', 'GUniFrac', 'WUniFrac', 'BC'), 
+                                 grp.name, adj.name=NULL, emp.lev=NULL, strata=NULL, pc.separate, pca.method='cmd', ann=NULL, sub=NULL,
+                                 clab=1.0, cex.pt=1.25, ellipse=T, cstar= 1, wid=900, hei=600, ...) {
+  # Implment strata
+  # To be completed, add continuous case
+  strata0 <- strata
+  
+  if (is.null(ann)) {
+    png(paste0('Beta_diversity_ordination_', pca.method, '_', grp.name, '.png'), width=wid, height=hei)
+  } else {
+    png(paste0('Beta_diversity_ordination_', pca.method, '_', ann, '.png'), width=wid, height=hei)
+  }
+  
+  
+  df <- data.obj$meta.dat
+  grp <- factor(df[, grp.name])
+  
+  if (is.null(emp.lev)) {
+    grp <- factor(grp, levels=c(setdiff(levels(grp), emp.lev), emp.lev))
+  }
+  
+  if (!is.null(strata)) {
+    strata <- factor(df[, strata])
+  } else {
+    strata <- factor(grp)
+  }
+  y <- list()
+  for (dist.name in dist.names) {
+    dist.temp <- dist.obj[[dist.name]]
+    if (!is.null(adj.name)) {
+      adj <- as.data.frame(df[, adj.name])
+      obj <- cmdscale(as.dist(dist.temp), k=ncol(dist.temp)-1)
+      dat2 <- apply(obj, 2, function(x) resid(lm(x ~ ., data=adj)))
+      dist.temp <- dist(dat2)
+    } 
+    if (pca.method == 'cmd') {
+      obj <- cmdscale(as.dist(dist.temp), k=2, eig=T)
+      pve <- round(obj$eig[1:2]/sum(abs(obj$eig))*100, 1)
+      y[[dist.name]] <- cbind(obj$points[, 1], obj$points[, 2])
+      xlab <- paste0('PC1(', pve[1], '%)')
+      ylab <- paste0('PC2(', pve[2], '%)')
+    } 
+    
+    if (pca.method == 'nmds') {
+      obj <- metaMDS(as.dist(dist.temp), k=2)
+      y[[dist.name]] <- cbind(obj$points[, 1], obj$points[, 2])
+      xlab <- 'NMDS1'
+      ylab <- 'NMDS2'
+    } 
+    
+    if (pca.method == 'pls') {
+      require(mixOmics)
+      # Test
+      obj <- cmdscale(as.dist(dist.temp), k=ncol(dist.temp)-1)
+      obj <- plsda(obj, grp, ncomp=2)
+      y[[dist.name]] <- cbind(obj$variates$X[, 1], obj$variates$X[, 2])
+      xlab <- 'PLS1'
+      ylab <- 'PLS2'
+    }
+    colnames(y[[dist.name]]) <- c("PC1", "PC2")
+    y[[dist.name]] <- as.data.frame(y[[dist.name]])
+    y[[dist.name]]$type <- grp
+    centroids <- aggregate(cbind(PC1,PC2)~type,data=y[[dist.name]],mean)
+    y[[dist.name]] <- merge(y[[dist.name]], centroids, by="type", suffixes=c("",".centroid"))
+  }
+  mtest <- melt(y, id=c('PC1', 'PC2', 'PC1.centroid', 'PC2.centroid', measure=c('type')))
+  test <- y
+  obj <- ggplot(mtest, aes(x=PC1, y=PC2, color=type)) + 
+    geom_point(size=3) +
+    geom_point(data=centroids,aes(x=PC1,y=PC2,color=type)) +
+    geom_segment(aes(x=PC1.centroid, y=PC2.centroid, xend=PC1, yend=PC2, color=type)) +
+    stat_ellipse() +
+    facet_wrap(~ L1, scale="free")
+  print(obj)
+  dev.off()
+}
+
 generate_distance_barplot <- function (data.obj, dist.obj, dist.names=c('UniFrac', 'GUniFrac', 'WUniFrac', 'BC'),
 		grp.name, strata=NULL, within=T, between=T) {
 	strata.name <- strata
