@@ -1836,7 +1836,7 @@ generate_distance_barplot <- function (data.obj, dist.obj, dist.names=c('UniFrac
 		dev.off()
     
     png(paste("Beta_diversity", "btw", between, "wth", within, "no_strata_barplot.png", sep="_"), width=900, height=600)
-		obj <- ggplot(temptest, aes(x=DistanceType, y=Distance, fill=DistanceType)) + 
+		obj <- ggplot(res.df, aes(x=DistanceType, y=Distance, fill=DistanceType)) + 
 		        geom_bar(position=position_dodge(width=0.9), stat="identity", width=0.75) + 
 		        geom_bar(position=position_dodge(width=0.9), stat="identity", width=0.75, colour="black", show_guide=FALSE, size=0.25) +
 		        geom_errorbar(limits, position=position_dodge(width=0.9), size=0.25, width=0.25) +
@@ -1943,6 +1943,16 @@ generate_distance_boxplot <- function (data.obj, dist.obj, dist.names=c('UniFrac
 			
 		}
 		dev.off()
+
+    png(paste("Beta_diversity", "btw", between, "wth", within, "no_strata_boxplot.png", sep="_"), width=900, height=600)
+    obj <- ggplot(res.df, aes(x=DistanceType, y=Distance, col=DistanceType)) + 
+            geom_boxplot(position=position_dodge(width=0.95), outlier.colour = NA) + 
+            labs(y=paste("Distance"), x='') +
+            theme(legend.position="none") + 
+            facet_wrap(~ DistanceMetric, scale="free_y")
+    print(obj)
+    dev.off()
+
 	} else {
 		pdf(paste("Beta_diversity", "btw", between, "wth", within, "strata", strata.name, "boxplot.pdf", sep="_"),
 				width=2.5*(nlevels(strata)-1) + 5, height=5)
