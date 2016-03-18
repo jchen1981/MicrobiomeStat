@@ -4610,7 +4610,7 @@ plot.Boruta2 <- function (x, colCode = c("green", "yellow", "red", "blue"), sort
 	names(lz[ind])
 }
 
-createROC <- function (pv.list, lab.list, pos.lab='1', file.name='ROC.pdf') {
+createROC <- function (pv.list, lab.list, pos.lab='1', file.name='ROC.png', level) {
 	require(ROCR)
 	n <- length(pv.list)
 	aucs <- numeric(n)
@@ -4618,8 +4618,9 @@ createROC <- function (pv.list, lab.list, pos.lab='1', file.name='ROC.pdf') {
 
 	cols <- scales::hue_pal()(n)
 	ltys <- rep(c(1, 2), ceiling(n/2))[1:n]
-	pdf(file.name)
-	for (i in 1:n) {
+	#pdf(file.name)
+	png(file.name, width=900, height=600)
+  for (i in 1:n) {
 		
   		    cat("*")
 			pv.mat <- pv.list[[i]]
@@ -4628,7 +4629,7 @@ createROC <- function (pv.list, lab.list, pos.lab='1', file.name='ROC.pdf') {
 			pred <- prediction(pv.mat, lab.mat==pos.lab)
 			perf <- performance(pred, "tpr", "fpr")
 			aucs[i] <- mean(unlist(performance(pred, 'auc')@y.values))
-			plot(perf, avg="threshold", col=cols[i], lty=ltys[i], lwd=2,  add=ifelse(i==1, FALSE, TRUE),  main='ROC curve')
+			plot(perf, avg="threshold", col=cols[i], lty=ltys[i], lwd=2,  add=ifelse(i==1, FALSE, TRUE),  main=paste0("ROC curve (", level, ")"))
 				
 		}
 
@@ -4759,7 +4760,7 @@ predictionRF <- function (data.obj,  resp.name, formula=NULL, taxa.level='Specie
 		cat("Fridman.test p value (M+CF vs CF): ", friedman.test(performance[, c('RF_M+CF', 'RF_CF')])$p.value, "\n")
 	}
 	
-	pdf(paste0("Taxa_Random_forest_misclassification_barplot_", taxa.level, '_', ann, ".pdf"), height=5, width=4)
+	png(paste0("Taxa_Random_forest_misclassification_barplot_", taxa.level, '_', ann, ".png"), height=600, width=900)
 	if (!is.null(formula)) {
 		performance2 <- performance[, c('Guess', 'RF_CF', 'RF_M', 'RF_M+CF')]
 	} else {
@@ -4771,7 +4772,7 @@ predictionRF <- function (data.obj,  resp.name, formula=NULL, taxa.level='Specie
 		boxplot(performance2, col="#4DAF4A", ylab='PMSE', las=2)
 	}	
 	dev.off()
-	
+  
 	# ROC curve - only compare to the first level of the factor 
 	if (is.factor(response)) {
 		lab.list <- lapply(lab.list, function(x) {
@@ -4780,7 +4781,8 @@ predictionRF <- function (data.obj,  resp.name, formula=NULL, taxa.level='Specie
 					y
 				}
 		)
-		createROC(roc.list, lab.list, pos.lab=levels(response)[1], file.name=paste0("Taxa_Random_forest_ROC_", taxa.level, '_', ann, ".pdf"))
+		#createROC(roc.list, lab.list, pos.lab=levels(response)[1], file.name=paste0("Taxa_Random_forest_ROC_", taxa.level, '_', ann, ".pdf"))
+		createROC(roc.list, lab.list, pos.lab=levels(response)[1], file.name=paste0("Taxa_Random_forest_ROC_", taxa.level, '_', ann, ".png"), level=taxa.level)
 	}
 	
 	if (is.factor(response)) {
