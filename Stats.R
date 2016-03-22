@@ -5119,6 +5119,7 @@ generate_taxa_heatmap <- function (data.obj, taxa.levels='Genus', taxa='All', me
 }
 
 generate_stacked_barplot <- function(data.obj, grp.name=NULL, taxa.levels=c('Phylum', 'Family', 'Genus'), agg.cutoff=0.005, 
+		border=TRUE,
 		hei1=6, wid1=9, hei2=6, wid2=9, margin=10, ann='') {
 	if (is.null(grp.name)) {
 		grp <- 1:nrow(data.obj$meta.dat)
@@ -5126,8 +5127,13 @@ generate_stacked_barplot <- function(data.obj, grp.name=NULL, taxa.levels=c('Phy
 		grp <- data.obj$meta.dat[, grp.name]
 	}
 	
-
 	pdf(paste0("Taxa_Stacked_Barplot_Overall_Compo_", ann, ".pdf"), height=hei1, width=wid1)
+	
+	if (border == FALSE) {
+		lty.o <- par("lty")
+		par(lty = 0)
+	}
+	
 	
 	par(mar=par('mar') + c(0, margin, 0, 0))
 	
@@ -5147,11 +5153,18 @@ generate_stacked_barplot <- function(data.obj, grp.name=NULL, taxa.levels=c('Phy
 		#rand.col <- c(sample(rainbow(nrow(prop)*2), nrow(prop)-1), 'gray')
 		rand.col <- c(rep_len(brewer.pal(12, "Paired"), nrow(prop)-1), 'gray')
 		col.list[[taxa.level]] <- rand.col
-
+		
 		cex.legend = ifelse (nrow(prop) > 35, 35/nrow(prop)*0.75, 0.75)
 		prop <- prop[, order(grp)]
-		barplot(prop, col=rand.col, ylab='Proportion', las=2, legend.text=rownames(prop), cex.names=0.5,
-				args.legend=list(x='left', bty='n',  cex=cex.legend, inset=c(-0.5, 0)), main=taxa.level)
+		if (border == FALSE) {
+			barplot(prop, col=rand.col, ylab='Proportion', las=2, legend.text=rownames(prop), cex.names=0.5, space=0,
+					args.legend=list(x='left', bty='n',  cex=cex.legend, inset=c(-0.5, 0)), main=taxa.level)
+			par(lty = lty.o)
+		} else {
+			barplot(prop, col=rand.col, ylab='Proportion', las=2, legend.text=rownames(prop), cex.names=0.5,
+					args.legend=list(x='left', bty='n',  cex=cex.legend, inset=c(-0.5, 0)), main=taxa.level)
+			
+		}
 		
 	}
 	dev.off()
@@ -5201,15 +5214,15 @@ generate_stacked_barplot <- function(data.obj, grp.name=NULL, taxa.levels=c('Phy
 			prop <- rbind(abund1, Other=abund2)
 			colnames(prop) <- colnames(abund0)
 			
-		#	cex.legend = ifelse (nrow(prop) > 35, 35/nrow(prop)*0.75, 0.75)
+			#	cex.legend = ifelse (nrow(prop) > 35, 35/nrow(prop)*0.75, 0.75)
 			#prop <- prop[, order(grp)]
-	        plot(1, type="n", axes=FALSE, xlab="", ylab="")
+			plot(1, type="n", axes=FALSE, xlab="", ylab="")
 			legend('left', legend=rownames(prop), bty='n', fill=col.list[[taxa.level]], cex=cex.legend)
 			
 		}
 		dev.off()
 	}
-
+	
 }
 
 build.decision.tree <- function(data.obj,  resp.name, taxa.level='Species', binary=FALSE, taxa, ann='All') {
