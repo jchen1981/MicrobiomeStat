@@ -5218,6 +5218,7 @@ generate_taxa_heatmap <- function (data.obj, taxa.levels='Genus', taxa='All', me
 }
 
 generate_stacked_barplot <- function(data.obj, grp.name=NULL, taxa.levels=c('Phylum', 'Family', 'Genus'), agg.cutoff=0.005, 
+		border=TRUE,
 		hei1=6, wid1=9, hei2=6, wid2=9, margin=10, ann='') {
 	if (is.null(grp.name)) {
 		grp <- 1:nrow(data.obj$meta.dat)
@@ -5228,6 +5229,10 @@ generate_stacked_barplot <- function(data.obj, grp.name=NULL, taxa.levels=c('Phy
 
 	pdf(paste0("Taxa_Stacked_Barplot_Overall_Compo_", ann, ".pdf"), height=hei1, width=wid1)
 	
+	if (border == FALSE) {
+		lty.o <- par("lty")
+		par(lty = 0)
+	}
 	par(mar=par('mar') + c(0, margin, 0, 0))
 	
 	name.list <- list()
@@ -5249,8 +5254,14 @@ generate_stacked_barplot <- function(data.obj, grp.name=NULL, taxa.levels=c('Phy
 
 		cex.legend = ifelse (nrow(prop) > 35, 35/nrow(prop)*0.75, 0.75)
 		prop <- prop[, order(grp)]
-		barplot(prop, col=rand.col, ylab='Proportion', las=2, legend.text=rownames(prop), cex.names=0.5,
-				args.legend=list(x='left', bty='n',  cex=cex.legend, inset=c(-0.5, 0)), main=taxa.level)
+		if (border == FALSE) {
+			barplot(prop, col=rand.col, ylab='Proportion', las=2, legend.text=rownames(prop), cex.names=0.5, space=0,
+					args.legend=list(x='left', bty='n',  cex=cex.legend, inset=c(-0.5, 0)), main=taxa.level)
+			par(lty = lty.o)
+		} else {
+			barplot(prop, col=rand.col, ylab='Proportion', las=2, legend.text=rownames(prop), cex.names=0.5,
+					args.legend=list(x='left', bty='n',  cex=cex.legend, inset=c(-0.5, 0)), main=taxa.level)
+		}
 		
 	}
 	dev.off()
