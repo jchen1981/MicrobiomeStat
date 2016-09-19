@@ -536,8 +536,8 @@ heatmap.3 <- function(x,
 	invisible(retval)
 }
 
-load_package <- function (package.names=c('MASS', 'ggbiplot', 'vegan', 'pscl', 'glmmADMB', 'aod', 'nlme', 'MiRKAT', 'matrixStats', 'gplots', 'scales', 'ggplot2', 'GUniFrac', 'rpart', 'qvalue', 'DESeq2',
-				'phangorn', 'phyloseq', 'RColorBrewer', 'squash', 'rhdf5', 'biom', 'reshape', 'randomForest', 'Boruta', 'ade4', 'Daim')) {
+load_package <- function (package.names=c('MASS', 'ggbiplot', 'ape', 'vegan', 'pscl', 'glmmADMB', 'aod', 'nlme', 'MiRKAT', 'matrixStats', 'gplots', 'scales', 'ggplot2', 'GUniFrac', 'rpart', 'qvalue', 'DESeq2',
+				'phangorn', 'phyloseq', 'RColorBrewer', 'squash', 'rhdf5', 'biom', 'reshape', 'randomForest', 'Boruta', 'ade4', 'Daim', 'rlocal')) {
 	for (package.name in package.names) {
 		require(package.name, character.only=T)
 	}
@@ -766,7 +766,7 @@ namedList <- function(...) {
 	setNames(L,nm)
 }
 
-read_hdf5_biom<-function(file_input){
+read_hdf5_biom <- function(file_input){
 	x = h5read(file_input,"/",read.attributes = TRUE)
 	data = generate_matrix(x)
 	rows = generate_metadata(x$observation)
@@ -792,7 +792,8 @@ read_hdf5_biom<-function(file_input){
 # comm are otu counts, row: otus, column samples
 # intersect.no: Pairwise ratio calculated on pairs with at least 'intersect.no' common taxa
 GMPR <- function (comm, intersect.no=4) {
-	sapply(1:ncol(comm),  function(i) {
+	ind.vec <- numeric(ncol(comm))
+	res <- sapply(1:ncol(comm),  function(i) {
 				x <- comm[, i]
 				pr <- sapply(1:ncol(comm),  function(j) {
 							y <- comm[, j]
@@ -803,10 +804,21 @@ GMPR <- function (comm, intersect.no=4) {
 								res <- NA
 							}
 						})
-				if (sum(is.na(pr)) != 0) warning(paste0('Sample '), i, ' does not have any common taxa with some other samples!\n')
+				if (sum(is.na(pr)) != 0) ind.vec[i] <<- 1
 				exp(mean(log(pr[!is.na(pr)])))
 			}
+	
 	)
+	if (sum(ind.vec)) warnings(paste0('Sample ', paste(which(ind.vec!=0), collapse=' '), ' do not have at least ', 
+						intersect.no, ' common taxa with some of the other samples. '))
+	if (sum(is.nan(res))) {
+		ind <- is.nan(res)
+		res[ind] <- 1
+		warning(paste0('Sample ', paste(which(ind), collapse=' '), ' do not have at least ', intersect.no, ' common taxa for any of the other samples. ',
+						'For these samples, we force the size factors to be 1, which may not be desirable! ', 
+						'You may consider decrease the parameter intersect.no or use other normalization methods!\n'))
+	}
+	res
 }
 
 uniquefy_taxa_names <- function (data.obj) {
@@ -820,9 +832,9 @@ uniquefy_taxa_names <- function (data.obj) {
 
 
 load_data <- function (otu.file, map.file, tree.file=NULL, parseFunction=parse_taxonomy_greengenes, version='Old', species=TRUE, filter.no=1, rep.seq=NULL,
-	     norm='TSS', intersect.no=4, winsor=FALSE, winsor.qt=0.97,
-		 ko.file=NULL, cog.file=NULL, ko.ann.file=NULL,
-		 meta.sep='', quote="", comment="", read.gg=FALSE, rff=FALSE, dep=NULL, seed=1234) {
+		norm='TSS', intersect.no=4, winsor=FALSE, winsor.qt=0.97,
+		ko.file=NULL, cog.file=NULL, ko.ann.file=NULL,
+		meta.sep='', quote="", comment="", read.gg=FALSE, rff=FALSE, dep=NULL, seed=1234) {
 	# ko and cog file are not rarefied	
 	# filter.no: filter the OTUs with read support less than filter.no (default is filtering singleton); singleton will not be filtered after rarefaction
 	# winsorization and GMPR should be further studied. Current default is false and GMPR is on the genus level
@@ -851,31 +863,65 @@ load_data <- function (otu.file, map.file, tree.file=NULL, parseFunction=parse_t
 	} else {
 		tree.12 <- NULL
 	}
-
-	cat("Load OTU file...\n")
+	
+	cat("Load OTU file...\n")  # Rewrite load new biom file, rev:2016-06-20
 	if (version != 'New') {
 		biom.obj <-  import_biom(otu.file, parseFunction = parseFunction)  
+		
+		otu.tab.12 <- otu_table(biom.obj)@.Data
+		otu.ind <- rowSums(otu.tab.12) > filter.no  # change otu.tab.12 != 0, rev:2016-06-20
+		otu.tab.12 <- otu.tab.12[otu.ind, ]
+		# OTU names
+		otu.name.full <- as.matrix(biom.obj@tax_table[, c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')])
+		otu.name.full <- otu.name.full[otu.ind, ]
+		
+		otu.name.12 <- otu.name.full[, c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')]
+		otu.name.12[is.na(otu.name.12)] <- 'unclassified'
+		otu.name.12 <- otu.name.12@.Data
+		
+		otu.name.12[, ] <- gsub('\\[', '', otu.name.12)
+		otu.name.12[, ] <- gsub('\\]', '', otu.name.12)
 	} else {
 		temp <-  read_hdf5_biom(otu.file)
-		otu.file <- paste0(otu.file, '.old')
-		write_biom(temp, otu.file) 
-		biom.obj <- import_biom(otu.file, parseFunction = parseFunction)  
+#		otu.file <- paste0(otu.file, '.old')
+#		write_biom(temp, otu.file) 
+#		biom.obj <- import_biom(otu.file, parseFunction = parseFunction)  
+		otu.tab.12 <- matrix(unlist(temp$data), byrow=T, nrow=temp$shape[1], ncol=temp$shape[2])
+		
+		otu.ids <- sapply(temp$rows, function(x) x[['id']])
+		sam.ids <- sapply(temp$columns, function(x) x[['id']])
+		
+#		res <- t(sapply(temp$rows, function(i) {
+#					i$metadata$taxonomy
+#				}))
+#		rownames(res) <- otu.ids 
+		
+		# From phyloseq: to be double checked!! Checked!
+		if (all(sapply(sapply(temp$rows, function(i) {
+									i$metadata
+								}), is.null))) {
+			otu.name.full <- NULL
+		} else {
+			taxlist = lapply(temp$rows, function(i) {
+						parseFunction(i$metadata$taxonomy)
+					})
+			names(taxlist) = sapply(temp$rows, function(i) {
+						i$id
+					})
+			otu.name.full = build_tax_table(taxlist)
+		}
+		
+		rownames(otu.tab.12) <- otu.ids
+		colnames(otu.tab.12) <- sam.ids
+		
+		otu.ind <- rowSums(otu.tab.12) > filter.no  # change otu.tab.12 != 0, rev:2016-06-20
+		otu.tab.12 <- otu.tab.12[otu.ind, ]	
+		otu.name.full <- otu.name.full[otu.ind, ]
+		otu.name.12 <- otu.name.full[, c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')]
+		otu.name.12[is.na(otu.name.12)] <- 'unclassified'
+		otu.name.12[, ] <- gsub('\\[', '', otu.name.12)
+		otu.name.12[, ] <- gsub('\\]', '', otu.name.12)
 	}
-
-	otu.tab.12 <- otu_table(biom.obj)@.Data
-	
-	otu.ind <- rowSums(otu.tab.12 != 0) > filter.no
-	otu.tab.12 <- otu.tab.12[otu.ind, ]
-	# OTU names
-	otu.name.full <- as.matrix(biom.obj@tax_table[, c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')])
-	otu.name.full <- otu.name.full[otu.ind, ]
-	
-	otu.name.12 <- otu.name.full[, c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')]
-	otu.name.12[is.na(otu.name.12)] <- 'unclassified'
-	otu.name.12 <- otu.name.12@.Data
-	
-	otu.name.12[, ] <- gsub('\\[', '', otu.name.12)
-	otu.name.12[, ] <- gsub('\\]', '', otu.name.12)
 	
 	if (rff == TRUE) {
 		if (is.null(dep)) {
@@ -883,23 +929,29 @@ load_data <- function (otu.file, map.file, tree.file=NULL, parseFunction=parse_t
 		} else {
 			otu.tab.12 <- t(Rarefy(t(otu.tab.12), dep)$otu.tab.rff)
 		}	
+		
+		# Remove empty OTUs
+		otu.ind <- rowSums(otu.tab.12) > 0  # rev:2016-06-28
+		otu.tab.12 <- otu.tab.12[otu.ind, ]	
+		otu.name.12 <- otu.name.12[otu.ind, ]
+		otu.name.full <- otu.name.full[otu.ind, ]
 	} 
-
+	
 	samIDs <- intersect(rownames(meta.dat), colnames(otu.tab.12))
 	if (length(samIDs) == 0)  stop('Sample names in the meta file and biom file differ?\n')
 	
 	meta.dat <- meta.dat[samIDs, ]
 	otu.tab.12 <- otu.tab.12[, samIDs]
 	
-
-   # Create abundance list
-    cat("Create taxa abundance list ...\n")
+	
+	# Create abundance list
+	cat("Create taxa abundance list ...\n")
 	abund.list.12 <- list()
 	hierachs <- c('Phylum', 'Class', 'Order', 'Family', 'Genus')
 	for (hierach in hierachs) {	
 		if (hierach != 'Phylum') {
 			single.names <- otu.name.12[, hierach]
-		#	single.names[grepl('unclassified', single.names, ignore.case=T)] <- paste0('Unclassified',substr(hierach, 1, 1))
+			#	single.names[grepl('unclassified', single.names, ignore.case=T)] <- paste0('Unclassified',substr(hierach, 1, 1))
 			tax.family <- paste(otu.name.12[, 'Phylum'], single.names, sep=";")
 			tax.family[grepl('unclassified', tax.family, ignore.case=T)] <- paste0('Unclassified_', hierach)
 		} else {
@@ -917,18 +969,24 @@ load_data <- function (otu.file, map.file, tree.file=NULL, parseFunction=parse_t
 		rownames(abund.list.12[['Species']]) <- paste0("OTU", rownames(otu.tab.12), ":", otu.name.12[, 'Phylum'], ";", otu.name.12[, 'Genus'])
 	}
 	
-
-	if (norm == 'GMPR') {
-		sf <- GMPR(abund.list.12[['Genus']], intersect.no)
-		names(sf) <- samIDs
-		warning('GMPR is only suitable for samples from a same body location!\n')
-	} else {
-		if (norm == 'TSS') {
-			sf <- colSums(otu.tab.12)
+	
+	if (rff == FALSE) {
+		if (norm == 'GMPR') {
+			sf <- GMPR(abund.list.12[['Genus']], intersect.no)
+			names(sf) <- samIDs
+			warning('GMPR is only suitable for samples from a same body location!\n')
 		} else {
-			sf <- NULL
+			if (norm == 'TSS') {
+				sf <- colSums(otu.tab.12)
+			} else {
+				# Other default: TSS
+				sf <- colSums(otu.tab.12)
+			}
 		}
+	} else {
+		sf <- colSums(otu.tab.12)
 	}
+	
 	
 	if (winsor == TRUE) {
 		# Addressing the outlier (97% percent) or at least one outlier
@@ -954,8 +1012,8 @@ load_data <- function (otu.file, map.file, tree.file=NULL, parseFunction=parse_t
 		# column/row switch
 		otu.tab.12 <- t(round(otu.tab.12.p * sf))
 	}
-
-		
+	
+	
 	# Rarefaction/Normalizing factors are not calculated for functional data
 	if (!is.null(ko.file)) {
 		cat("Load kegg file...\n")
@@ -963,8 +1021,8 @@ load_data <- function (otu.file, map.file, tree.file=NULL, parseFunction=parse_t
 		ko.dat <- as.matrix(biom_data(ko))
 		ko.dat <- ko.dat[, intersect(colnames(ko.dat), samIDs)]
 		# Rarefaction?
-	  
-	    if (is.null(ko.ann.file)) {
+		
+		if (is.null(ko.ann.file)) {
 			# Old - back compatability
 			ko.ann <- observation_metadata(ko)
 			ko.ann <- cbind(KEGG_Pathways1=sapply(ko.ann, function(x) x['KEGG_Pathways1']), 
@@ -1022,7 +1080,7 @@ load_data <- function (otu.file, map.file, tree.file=NULL, parseFunction=parse_t
 			}
 			rownames(abund.list.12[["KEGG_Toxin"]]) <- kos.id
 		}
-	
+		
 	}
 	
 	if (!is.null(cog.file)) {
@@ -1041,9 +1099,16 @@ load_data <- function (otu.file, map.file, tree.file=NULL, parseFunction=parse_t
 			abund.list.12[[hierach]] <- family
 		}
 	}
-		
+	
+	# Drop tree tips
+	absent <- tree.12$tip.label[!(tree.12$tip.label %in% rownames(otu.tab.12))]
+	if (length(absent) != 0) {
+		tree.12 <- drop.tip(tree.12, absent)
+		warning("The tree has OTUs not in the OTU table!")
+	}
+	
 	data.obj <- list(otu.tab=otu.tab.12, otu.name=otu.name.12, abund.list=abund.list.12, meta.dat=meta.dat, tree=tree.12,
-			otu.name.full=otu.name.full, size.factor=sf, call=match.call())
+			otu.name.full=otu.name.full, size.factor=sf, norm.method=norm, call=match.call())
 }
 
 # THe GMPR was performed on the genus level, it may not be a good idea
@@ -1083,7 +1148,7 @@ winsor_data <- function (data.obj, norm='GMPR', intersect.no=4, winsor.qt=0.97) 
 	)
 	# column/row switch
 	otu.tab.12 <- t(round(otu.tab.12.p * sf))
-    data.obj$otu.tab <- otu.tab.12
+	data.obj$otu.tab <- otu.tab.12
 	data.obj$abund.list <- abund.list.12
 	data.obj$size.factor <- sf
 	data.obj
@@ -1107,7 +1172,7 @@ construct_distance <- function (data.obj, unifrac.file=NULL,  Phylum='All', dist
 				otu.tab <- Rarefy(otu.tab, dep)$otu.tab.rff
 			}	
 		}
-				
+		
 		if (Phylum != 'All') {
 			ind <- data.obj$otu.name[, 'Phylum'] == Phylum
 			otu.tab <- otu.tab[, ind]
@@ -1115,15 +1180,21 @@ construct_distance <- function (data.obj, unifrac.file=NULL,  Phylum='All', dist
 		
 		# Filter otus with reads <= filter.no
 		otu.tab <- otu.tab[, colSums(otu.tab) > filter.no]
-        
+		
 		# Remove samples with no reads
 		if (sum(rowSums(otu.tab) == 0) >= 1) {
 			otu.tab <- otu.tab[rowSums(otu.tab) != 0, ]
-			warnings('Some samples do not have reads after rarefaction! Please be careful!\n')
+			warning('Some samples do not have reads after rarefaction! Please be careful!\n')
 		}
 		
-		unifrac12 <- GUniFrac(otu.tab, data.obj$tree)$unifracs
-	
+		# To make sure the OTUs in otu.tab are in the tree (rev:2016-06-19)
+		
+		if (sum(!(colnames(otu.tab) %in% data.obj$tree$tip.label))) {
+			warning('Some OTU names are not in the tree! An intersection set will be used!\n')	
+		}
+		common.otus <- intersect(colnames(otu.tab), data.obj$tree$tip.label)
+		unifrac12 <- GUniFrac(otu.tab[, common.otus], data.obj$tree)$unifracs
+		
 		dist.list.12[['WUniFrac']] <- unifrac12[, , 'd_1']
 		dist.list.12[['GUniFrac']] <- unifrac12[, , 'd_0.5']
 		if (is.null(unifrac.file)) {
@@ -1132,10 +1203,10 @@ construct_distance <- function (data.obj, unifrac.file=NULL,  Phylum='All', dist
 			# The orders may be different
 			dist.list.12[['UniFrac']] <- as.matrix(read.table(unifrac.file, row.names=1, header=T)) # Rarefaction
 		}
-
+		
 		# Need speed up
 		# Suggest using rarefied counts 
-	    # If case/control has different sequencing depth, it will result in false clustering! 
+		# If case/control has different sequencing depth, it will result in false clustering! 
 		dist.list.12[['BC']] <-as.matrix(vegdist(otu.tab))
 		
 		genus <- t(data.obj$abund.list[['Genus']])
@@ -1150,8 +1221,8 @@ construct_distance <- function (data.obj, unifrac.file=NULL,  Phylum='All', dist
 			save(dist.list.12, file=save.RData)
 		}
 	}
-
-    return(dist.list.12)
+	
+	return(dist.list.12)
 }
 
 
@@ -1183,33 +1254,34 @@ subset_dist <- function (dist.obj, samIDs) {
 perform_sequence_stat_analysis <- function (data.obj, ann='') {
 	sink(paste0('Sequence_Analysis_Statistics_', ann, '.txt'))
 	otu.tab <- data.obj$otu.tab
-
+	
 	# Sequencing depth
 	otu.abund <- rowSums(otu.tab)
 	sam.abund <- colSums(otu.tab)
 	otu.prev <- rowSums(otu.tab!=0)/ncol(otu.tab)
-
+	
 	otu.abund <- otu.abund[otu.abund >= 1]
 	sam.abund <- sam.abund[sam.abund >= 1]
 	cat('16S rDNA targeted sequencing yields ', mean(sam.abund), 'reads/sample on average (range:', min(sam.abund), '-', max(sam.abund), ').')
 	cat('Clustering of these 16S sequence tags produces ', sum(otu.abund > 0), ' OTUs at 97% similarity level.')
-
-	png(paste0('Sequence_Analysis_Statistics_', ann, '.png'), height=600, width=900)
+	
+	pdf(paste0('Sequence_Analysis_Statistics_', ann, '.pdf'), height=5, width=5)
 	obj <- ggplot2::ggplot(data=data.frame(x=otu.abund), aes(x=x)) + geom_histogram(col='black', fill='gray') + ylab('Frequency') + xlab('Abundance(Total counts)') +
-		scale_x_log10(breaks=c(1, 10, 100, 1000, 10000, 100000, 100000))
-	obj2 <- ggplot2::ggplot(data=data.frame(x=sam.abund), aes(x=x)) + geom_histogram(col='black', fill='gray')  + ylab('Frequency') + xlab('Sequencing depth')
-	obj3 <- ggplot2::ggplot(data=data.frame(x=otu.prev), aes(x=x))  + ylab('Frequency') + xlab('Prevalence(Occurence frequency)') + geom_histogram(col='black', fill='gray')
-	multiplot(obj,obj2,obj3, cols=1)
+			scale_x_log10(breaks=c(1, 10, 100, 1000, 10000, 100000, 100000))
+	print(obj)
+	obj <- ggplot2::ggplot(data=data.frame(x=sam.abund), aes(x=x)) + geom_histogram(col='black', fill='gray')  + ylab('Frequency') + xlab('Sequencing depth')
+	print(obj)
+	obj <- ggplot2::ggplot(data=data.frame(x=otu.prev), aes(x=x))  + ylab('Frequency') + xlab('Prevalence(Occurence frequency)') + geom_histogram(col='black', fill='gray')
+	print(obj)
 	dev.off()
-
+	
 	phy.abund <- data.obj$abund.list[['Phylum']]
 	fam.abund <- data.obj$abund.list[['Family']]
 	gen.abund <- data.obj$abund.list[['Genus']]
-
+	
 	phy.prev <- rowSums(phy.abund != 0) / ncol(phy.abund)
 	fam.prev <- rowSums(fam.abund != 0) / ncol(phy.abund)
 	gen.prev <- rowSums(gen.abund != 0) / ncol(phy.abund)
-
 	
 	phy.abund <- rowMeans(t(t(phy.abund) / sam.abund))
 	fam.abund <- rowMeans(t(t(fam.abund) / sam.abund))
@@ -1243,20 +1315,12 @@ perform_sequence_stat_analysis <- function (data.obj, ann='') {
 	cat('\nThe most abundant families are ', paste(paste0(names(fam.abund), '(', fam.abund, '%)'), collapse=' '), ';')
 	cat('\nand the most abundant genera are ', paste(paste0(names(gen.abund), '(', gen.abund, '%)'), collapse=' '), '.')
 	sink()
-	sink(paste0('Sequence_Analysis_Statistics_table_', ann, '.tsv'))
-	write.table(cbind(read.table(text=names(phy.prev)), unname(phy.prev), "Phylum", "Prevalence"), row.names=FALSE, col.names=FALSE)
-	write.table(cbind(read.table(text=names(fam.prev)), unname(fam.prev), "Family", "Prevalence"), row.names=FALSE, col.names=FALSE)
-	write.table(cbind(read.table(text=names(gen.prev)), unname(gen.prev), "Genus", "Prevalence"), row.names=FALSE, col.names=FALSE)
-	write.table(cbind(read.table(text=names(phy.abund)), unname(phy.abund), "Phylum", "Abundance"), row.names=FALSE, col.names=FALSE)
-	write.table(cbind(read.table(text=names(fam.abund)), unname(fam.abund), "Family", "Abundance"), row.names=FALSE, col.names=FALSE)
-	write.table(cbind(read.table(text=names(gen.abund)), unname(gen.abund), "Genus", "Abundance"), row.names=FALSE, col.names=FALSE)
-	sink()
 }
 
 perform_demograph_analysis <- function (data.obj, grp.name) {
 	obj <- summary(data.obj$meta.dat)
 	write.csv(obj, "meta.data.summary.csv", quote=F)
-
+	
 	grp <- data.obj$meta.dat[, grp.name]
 	res <- NULL
 	pv.vec <- NULL
@@ -1278,7 +1342,7 @@ perform_demograph_analysis <- function (data.obj, grp.name) {
 					}
 				}
 				res <- rbind(res, c('Fisher p', pv, rep("", nlevels(grp) - 1)))
-
+				
 			} else {
 				res <- rbind(res, c('mean', aggregate(temp, by=list(grp), FUN='mean')[, 2]))
 				res <- rbind(res, c('sd', aggregate(temp, by=list(grp), FUN='sd')[, 2]))
@@ -1292,17 +1356,17 @@ perform_demograph_analysis <- function (data.obj, grp.name) {
 					res <- rbind(res, c('ANOVA p', 'NA', rep("", nlevels(grp) - 1)))
 					pv <- NA
 				}
-
+				
 			}
 			res <- rbind(res, rep("", nlevels(grp)+1))
 			pv.vec <- c(pv.vec, pv)
 		}
 		
 	} else {
-
+		
 		
 	}
-
+	
 	write.csv(res, "meta.data.by.grp.csv", row.names=F, quote=F)
 	names(pv.vec) <- setdiff(colnames(data.obj$meta.dat), grp.name)
 	return(pv.vec)
@@ -1310,7 +1374,7 @@ perform_demograph_analysis <- function (data.obj, grp.name) {
 
 
 generate_rarefy_curve <- function (data.obj, phylo.obj, grp.name, depth=NULL, npoint=10, iter.no=5,
-		measures=c('Observed', 'Chao1', 'Shannon', 'InvSimpson'), ann='') {
+		measures=c('Observed', 'Chao1', 'Shannon', 'InvSimpson'), ann='', gg.cmd="theme(legend.justification=c(1,0), legend.position=c(1,0))", wid=5, hei=5) {
 	cat("Create rarefaction curves!\n")
 	if (is.null(depth)) {
 		depth <- min(sample_sums(phylo.obj))
@@ -1327,7 +1391,7 @@ generate_rarefy_curve <- function (data.obj, phylo.obj, grp.name, depth=NULL, np
 	
 	df <- data.obj$meta.dat
 	grp <- df[, grp.name]
-
+	
 	res <- NULL
 	incr <- depth %/% npoint
 	sink('temp.txt')
@@ -1342,8 +1406,8 @@ generate_rarefy_curve <- function (data.obj, phylo.obj, grp.name, depth=NULL, np
 	}
 	colnames(res) <- rownames(df)
 	sink()
-	res_list <- list()
-	pdf(paste0("Alpha_diversity_Rarefaction_Curve_", ann, ".pdf"), width=5, height=5)
+	
+	pdf(paste0("Alpha_diversity_Rarefaction_Curve_", ann, ".pdf"), width=wid, height=hei)
 	for (i in 1:length(measures)) {
 		measure <- measures[i]
 		cat("Measure: ", measure, "\n")
@@ -1369,24 +1433,14 @@ generate_rarefy_curve <- function (data.obj, phylo.obj, grp.name, depth=NULL, np
 				geom_errorbar(aes(ymin=min, ymax=max), alpha=0.5, width=.25, position=position_dodge(.2)) + 
 				geom_line() + 
 				geom_point(size=3, shape=21, fill="white") +
-				labs(y=measure) +
-				theme(legend.justification=c(1,0), legend.position=c(1,0))
-		print(obj)
-    res_list[[measure]] <- res2
-    res2
+				labs(y=measure)
+		
+		if (!is.null(gg.cmd)) {
+			obj <- obj + eval(parse(text=gg.cmd))
+		}
+		
+		print(obj)		
 	}
-  dev.off()
-	png(paste0("Alpha_diversity_Rarefaction_Curve_", ann, ".png"), width=900, height=600)
-  mres_list = melt(res_list, measure.vars=c("mean", "max", "min"))
-	cres_list <- cast(mres_list, L1 + Group + Depth ~ variable, fun.aggregate=mean)
-	obj <- ggplot(cres_list, aes(x=Depth, y=mean, color=Group, group=Group)) +
-    geom_errorbar(aes(ymin=min, ymax=max), alpha=0.5, width=.25, position=position_dodge(.2)) + 
-	  geom_line() + 
-	  geom_point(size=3, shape=21, fill="white") +
-	  labs(y="Alpha diversity") +
-	  #theme(legend.justification=c(1,0), legend.position=c(1,0)) + 
-    facet_wrap(~ L1, scale="free_y")
-  print(obj)
 	dev.off()
 }
 
@@ -1406,7 +1460,7 @@ perform_alpha_test <- function (data.obj, phylo.obj, rarefy=TRUE, depth=NULL, it
 				data.obj <- subset_data(data.obj, ind)
 			}
 		}
-			
+		
 		x <- 0
 		sink('temp.txt')
 		for (i in 1:iter.no) {
@@ -1418,7 +1472,7 @@ perform_alpha_test <- function (data.obj, phylo.obj, rarefy=TRUE, depth=NULL, it
 	} else {
 		x <- estimate_richness(phylo.obj, measures=measures)
 	}
-
+	
 	df <- data.obj$meta.dat
 	
 	if (rarefy == T) {
@@ -1451,11 +1505,11 @@ perform_alpha_test <- function (data.obj, phylo.obj, rarefy=TRUE, depth=NULL, it
 		cat("\n")
 	}
 	sink()
-
+	
 }
 
 generate_alpha_boxplot <- function (data.obj, phylo.obj, rarefy=TRUE, depth=NULL, grp.name, strata=NULL, 
-		measures=c('Observed', 'Chao1', 'Shannon', 'InvSimpson')) {	
+		measures=c('Observed', 'Chao1', 'Shannon', 'InvSimpson'), gg.cmd=NULL) {	
 	# To be completed - jetter when strata is not null
 	if (rarefy == TRUE) {
 		if (is.null(depth)) {
@@ -1464,48 +1518,37 @@ generate_alpha_boxplot <- function (data.obj, phylo.obj, rarefy=TRUE, depth=NULL
 			if (depth > min(sample_sums(phylo.obj))) {
 				ind <- (sample_sums(phylo.obj) >= depth)
 				cat(sum(!ind), " samples do not have sufficient number of reads!\n")
-				sample_data(phylo.obj) <- sample_data(phylo.obj)[ind, ]
+				
+				sample_data(phylo.obj) <- sample_data(phylo.obj)[ind, ] 
 				data.obj <- subset_data(data.obj, ind)
 			}
 		}
+		
 		phylo.even <- rarefy_even_depth(phylo.obj, depth, rngseed=12345)
-		est_rich <- estimate_richness(phylo.even, measures=measures)
+		x <- estimate_richness(phylo.even, measures=measures)
 	} else {
-		est_rich <- estimate_richness(phylo.obj, measures=measures)
-	} 
-  
+		x <- estimate_richness(phylo.obj, measures=measures)
+	}
+	
 	df <- data.obj$meta.dat
 	grp <- df[, grp.name]
-  
+	
 	hei <- 5
 	if (is.null(strata)) {
 		wid <- 5
-	} else { 
+	} else {
 		wid <- 5.5
-	} 
+	}
 	if (rarefy == T) {
-		png(paste0('Alpha_diversity_boxplot_rarefied.png'), height=600, width=900)
+		pdf(paste0('Alpha_diversity_boxplot_rarefied.pdf'), height=hei, width=wid)
 	} else {
 		pdf(paste0('Alpha_diversity_boxplot_unrarefied.pdf'), height=hei, width=wid)
 	}
-	obj_list <- list()
 	
 	if (is.null(strata)) {
-		df = data.frame(Value=est_rich[, measures], Group=grp)
-		mdf <- melt(df)
-		obj <- ggplot(mdf, aes(x=Group, y=value, col=Group)) + geom_boxplot(position=position_dodge(width=0.75), outlier.colour = NA) +
-		geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) + labs(y="Alpha Diversity") + facet_wrap(~ variable, scale="free_y")
-		print(obj)
-		dev.off()
-
-		if (rarefy == T) {
-                	pdf(paste0('Alpha_diversity_boxplot_rarefied.pdf'), height=hei, width=wid)
-		} else {
-                	pdf(paste0('Alpha_diversity_boxplot_unrarefied.pdf'), height=hei, width=wid)
-        	}
 		for (measure in measures) {
 			cat(measure, '\n')
-			xx <- est_rich[, measure]		
+			xx <- x[, measure]		
 			df2 <- data.frame(Value=xx, Group=grp)
 			dodge <- position_dodge(width=0.75)
 			obj <- ggplot(df2, aes(x=Group, y=Value, col=Group)) +
@@ -1513,23 +1556,31 @@ generate_alpha_boxplot <- function (data.obj, phylo.obj, rarefy=TRUE, depth=NULL
 					geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) +
 					labs(y=measure) +
 					theme(legend.position="none")
+			if (!is.null(gg.cmd)) {
+				obj <- obj + eval(parse(text=gg.cmd))
+			}
+			
 			print(obj)
 		}	
-
 	} else {
 		for (measure in measures) {
 			cat(measure, '\n')
-			xx <- x[, measure]
+			xx <- x[, measure]		
 			grp2 <- df[, strata]
 			df2 <- data.frame(Value=xx, Group=grp, Strata=grp2)
+			
 			dodge <- position_dodge(width=0.95)
-			obj_list[[measure]] <- ggplot(df2, aes(x=Strata, y=Value, col=Group)) +
-			geom_boxplot(position=dodge,  outlier.colour = NA) + 
-			geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) +
-			labs(y=measure, x=strata) 
+			obj <- ggplot(df2, aes(x=Strata, y=Value, col=Group)) +
+					geom_boxplot(position=dodge,  outlier.colour = NA) + 
+					geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) +
+					labs(y=measure, x=strata) 
+			if (!is.null(gg.cmd)) {
+				obj <- obj + eval(parse(text=gg.cmd))
+			}
+			print(obj)
 		}
-		multiplot(plotlist=obj_list, cols=2)
-  	}
+		
+	}
 	dev.off()
 }
 
@@ -1571,7 +1622,7 @@ generate_ordination <- function (data.obj, dist.obj, dist.names=c('UniFrac', 'GU
 			pdf(paste0('Beta_diversity_ordination_', pca.method, '_', ann, '.pdf'), width=wid, height=hei)
 		}
 	}
-
+	
 	df <- data.obj$meta.dat
 	grp <- factor(df[, grp.name])
 	
@@ -1605,12 +1656,12 @@ generate_ordination <- function (data.obj, dist.obj, dist.names=c('UniFrac', 'GU
 			xlab <- paste0('PC1(', pve[1], '%)')
 			ylab <- paste0('PC2(', pve[2], '%)')
 		} 
-
+		
 		if (pca.method == 'nmds') {
-				obj <- metaMDS(as.dist(dist.temp), k=2)
-				y <- cbind(obj$points[, 1], obj$points[, 2])
-				xlab <- 'NMDS1'
-                ylab <- 'NMDS2'
+			obj <- metaMDS(as.dist(dist.temp), k=2)
+			y <- cbind(obj$points[, 1], obj$points[, 2])
+			xlab <- 'NMDS1'
+			ylab <- 'NMDS2'
 		} 
 		
 		if (pca.method == 'pls') {
@@ -1632,14 +1683,15 @@ generate_ordination <- function (data.obj, dist.obj, dist.names=c('UniFrac', 'GU
 		col2 <- darkcols[1:nlevels(grp)]
 		col3 <- darkcols[grp]
 		if (!is.null(emp.lev)) {
+			
 			col1 <- col2
 			col1[which(levels(grp) != emp.lev)] <- rgb(0.5, 0.5, 0.5, 0.5)
 			col1[which(levels(grp) == emp.lev)] <- rgb(1.0, 0, 0, 1.0)
 			col2[which(levels(grp) != emp.lev)] <- rgb(0.5, 0.5, 0.5, 0.5)
 			col2[which(levels(grp) == emp.lev)] <- rgb(1.0, 0, 0, 1.0)
-            col3[grp !=  emp.lev] <- rgb(0.5, 0.5, 0.5, 0.5)
+			col3[grp !=  emp.lev] <- rgb(0.5, 0.5, 0.5, 0.5)
 			col3[grp ==  emp.lev] <- rgb(1.0, 0, 0, 1.0)
-
+			
 		}
 		if (ellipse == T) {
 			s.class(y, 
@@ -1668,9 +1720,9 @@ generate_ordination <- function (data.obj, dist.obj, dist.names=c('UniFrac', 'GU
 				add.plot=T
 		)
 		if (!is.null(strata0)) {
-			legend('topleft', legend=(levels(strata)), pch=pchs[1:nlevels(strata)])	
+			legend('topright', legend=(levels(strata)), pch=pchs[1:nlevels(strata)])	
 		}
-
+		
 		title(main=paste(dist.name, "distance"), sub=sub)
 #		text(-0.25, 0.3, "PERMANOVA p=0.016")
 	}
@@ -1681,13 +1733,13 @@ generate_ordination <- function (data.obj, dist.obj, dist.names=c('UniFrac', 'GU
 }
 
 generate_distance_barplot <- function (data.obj, dist.obj, dist.names=c('UniFrac', 'GUniFrac', 'WUniFrac', 'BC'),
-		grp.name, strata=NULL, within=T, between=T) {
+		grp.name, strata=NULL, within=T, between=T, ann='') {
 	strata.name <- strata
 	df <- data.obj$meta.dat
 	grp <- df[, grp.name]
 	grp.levels <- levels(grp)
 	grp.nlevels <- nlevels(grp)
-	grp.btws <- outer(grp.levels, grp.levels, paste, sep="_")
+	grp.btws <- outer(grp.levels, grp.levels, paste, sep="#")
 	grp.btws <- grp.btws[lower.tri(grp.btws)]
 	
 	if (!is.null(strata.name)) {
@@ -1700,24 +1752,24 @@ generate_distance_barplot <- function (data.obj, dist.obj, dist.names=c('UniFrac
 		for (stratum in levels(strata)) {
 			ind <- strata %in% stratum
 			dist.sub <- dist.obj[[dist.name]][ind, ind]
-			df2 <- df[ind, ]
+			df2 <- df[ind, , drop=FALSE]
 			if (between) {
 				for (grp.btw in grp.btws) {
-					ind1 <- df2[, grp.name] == unlist(strsplit(grp.btw, "_"))[1]
-					ind2 <- df2[, grp.name] == unlist(strsplit(grp.btw, "_"))[2]	
+					ind1 <- df2[, grp.name] == unlist(strsplit(grp.btw, "#"))[1]
+					ind2 <- df2[, grp.name] == unlist(strsplit(grp.btw, "#"))[2]	
 					temp <- as.vector(dist.sub[ind1, ind2])
 					res.df <- rbind(res.df, data.frame(DistanceMetric=dist.name, Strata=stratum, Compare='Between', 
-									DistanceType=grp.btw, Distance=mean(temp), sd=sd(temp)))
+									DistanceType=grp.btw, Distance=mean(temp), sd=sd(temp) / sqrt(length(temp)) * 1.96))
 				}	
 			}
-
+			
 			if (within) {
 				for (grp.wth in grp.levels) {
 					ind1 <- df2[, grp.name] == grp.wth
 					temp <- dist.sub[ind1, ind1]			
 					temp <- temp[lower.tri(temp)]
 					res.df <- rbind(res.df, data.frame(DistanceMetric=dist.name, Strata=stratum, Compare='Within',
-									DistanceType=grp.wth, Distance=mean(temp), sd=sd(temp)))
+									DistanceType=grp.wth, Distance=mean(temp), sd=sd(temp) / sqrt(length(temp)) * 1.96))
 				}	
 			}
 		}
@@ -1725,11 +1777,11 @@ generate_distance_barplot <- function (data.obj, dist.obj, dist.names=c('UniFrac
 	}
 	if (between & within) {
 		res.df$DistanceType <- factor(res.df$DistanceType, levels=c(grp.btws, grp.levels))
-		levels(res.df$DistanceType) <- c(sapply(strsplit(grp.btws, "_"), paste, collapse=' vs\n'), paste('Within\n', grp.levels))
+		levels(res.df$DistanceType) <- c(sapply(strsplit(grp.btws, "#"), paste, collapse=' vs\n'), paste('Within\n', grp.levels))
 	} else {
 		if (between) {
 			res.df$DistanceType <- factor(res.df$DistanceType)
-			levels(res.df$DistanceType) <- c(sapply(strsplit(grp.btws, "_"), paste, collapse=' vs\n'))
+			levels(res.df$DistanceType) <- c(sapply(strsplit(grp.btws, "#"), paste, collapse=' vs\n'))
 		} else {
 			res.df$DistanceType <- factor(res.df$DistanceType)
 			levels(res.df$DistanceType) <- c(paste('Within\n', grp.levels))
@@ -1737,7 +1789,7 @@ generate_distance_barplot <- function (data.obj, dist.obj, dist.names=c('UniFrac
 	}
 	
 	if (is.null(strata.name)) {
-		pdf(paste("Beta_diversity", "btw", between, "wth", within, "no_strata_barplot.pdf", sep="_"),
+		pdf(paste0("Beta_diversity_btw", between, "_wth", within, "no_strata_barplot_", ann, ".pdf"),
 				width=5, height=5)
 		
 		limits <- aes(ymax = Distance + sd, ymin=Distance - sd)
@@ -1751,13 +1803,13 @@ generate_distance_barplot <- function (data.obj, dist.obj, dist.names=c('UniFrac
 					geom_errorbar(limits, position=dodge, size=0.25, width=0.25) +
 					labs(y=paste(dist.name, "Distance"), x='') +
 					theme(legend.position="none")
-					
+			
 			print(obj1)
 			
 		}
 		dev.off()
 	} else {
-		pdf(paste("Beta_diversity", "btw", between, "wth", within, "strata", strata.name, "barplot.pdf", sep="_"),
+		pdf(paste0("Beta_diversity_btw", between, "_wth", within, "_strata", strata.name, "barplot_", ann, ".pdf"),
 				width=2.5*(nlevels(strata)-1) + 5, height=5)
 		
 		limits <- aes(ymax = Distance + sd, ymin=Distance - sd)
@@ -1780,13 +1832,13 @@ generate_distance_barplot <- function (data.obj, dist.obj, dist.names=c('UniFrac
 }
 
 generate_distance_boxplot <- function (data.obj, dist.obj, dist.names=c('UniFrac', 'GUniFrac', 'WUniFrac', 'BC'),
-		grp.name, strata=NULL, within=F, between=T) {
+		grp.name, strata=NULL, within=F, between=T, ann='') {
 	strata.name <- strata
 	df <- data.obj$meta.dat
 	grp <- df[, grp.name]
 	grp.levels <- levels(grp)
 	grp.nlevels <- nlevels(grp)
-	grp.btws <- outer(grp.levels, grp.levels, paste, sep="_")
+	grp.btws <- outer(grp.levels, grp.levels, paste, sep="#")
 	grp.btws <- grp.btws[lower.tri(grp.btws)]
 	
 	if (!is.null(strata.name)) {
@@ -1799,11 +1851,11 @@ generate_distance_boxplot <- function (data.obj, dist.obj, dist.names=c('UniFrac
 		for (stratum in levels(strata)) {
 			ind <- strata %in% stratum
 			dist.sub <- dist.obj[[dist.name]][ind, ind]
-			df2 <- df[ind, ]
+			df2 <- df[ind, , drop=FALSE]
 			if (between) {
 				for (grp.btw in grp.btws) {
-					ind1 <- df2[, grp.name] == unlist(strsplit(grp.btw, "_"))[1]
-					ind2 <- df2[, grp.name] == unlist(strsplit(grp.btw, "_"))[2]	
+					ind1 <- df2[, grp.name] == unlist(strsplit(grp.btw, "#"))[1]
+					ind2 <- df2[, grp.name] == unlist(strsplit(grp.btw, "#"))[2]	
 					temp <- as.vector(dist.sub[ind1, ind2])
 					n <- length(temp)
 					res.df <- rbind(res.df, data.frame(DistanceMetric=rep(dist.name, n), Strata=rep(stratum, n), Compare=rep('Between', n),
@@ -1826,11 +1878,11 @@ generate_distance_boxplot <- function (data.obj, dist.obj, dist.names=c('UniFrac
 	}
 	if (between & within) {
 		res.df$DistanceType <- factor(res.df$DistanceType, levels=c(grp.btws, grp.levels))
-		levels(res.df$DistanceType) <- c(sapply(strsplit(grp.btws, "_"), paste, collapse=' vs\n'), paste('Within\n', grp.levels))
+		levels(res.df$DistanceType) <- c(sapply(strsplit(grp.btws, "#"), paste, collapse=' vs\n'), paste('Within\n', grp.levels))
 	} else {
 		if (between) {
 			res.df$DistanceType <- factor(res.df$DistanceType)
-			levels(res.df$DistanceType) <- c(sapply(strsplit(grp.btws, "_"), paste, collapse=' vs\n'))
+			levels(res.df$DistanceType) <- c(sapply(strsplit(grp.btws, "#"), paste, collapse=' vs\n'))
 		} else {
 			res.df$DistanceType <- factor(res.df$DistanceType)
 			levels(res.df$DistanceType) <- c(paste('Within\n', grp.levels))
@@ -1838,7 +1890,7 @@ generate_distance_boxplot <- function (data.obj, dist.obj, dist.names=c('UniFrac
 	}
 	
 	if (is.null(strata.name)) {
-		pdf(paste("Beta_diversity", "btw", between, "wth", within, "no_strata_boxplot.pdf", sep="_"),
+		pdf(paste0("Beta_diversity_btw", between, "_wth", within, "no_strata_boxplot_", ann, ".pdf"),
 				width=5, height=5)
 		
 		for (dist.name in dist.names) {
@@ -1857,7 +1909,7 @@ generate_distance_boxplot <- function (data.obj, dist.obj, dist.names=c('UniFrac
 		}
 		dev.off()
 	} else {
-		pdf(paste("Beta_diversity", "btw", between, "wth", within, "strata", strata.name, "boxplot.pdf", sep="_"),
+		pdf(paste0("Beta_diversity_btw", between, "_wth", within, "_strata", strata.name, "boxplot_", ann, ".pdf"),
 				width=2.5*(nlevels(strata)-1) + 5, height=5)
 		
 		for (dist.name in dist.names) {
@@ -1866,7 +1918,7 @@ generate_distance_boxplot <- function (data.obj, dist.obj, dist.names=c('UniFrac
 			dodge <- position_dodge(width=0.95)		
 			obj1 <- ggplot(temp, aes(x=Strata, y=Distance, col=DistanceType)) + 
 					geom_boxplot(position=dodge, outlier.colour = NA) + 
-		#			geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) +
+					#			geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) +
 					labs(y=paste(dist.name, "Distance"), x=strata.name)
 			print(obj1)
 			
@@ -1883,7 +1935,7 @@ generate_clustering <- function(data.obj, dist.obj, dist.names=c('UniFrac', 'GUn
 	
 	pdf(paste0("Beta_diversity_Hierachical_clustering_", ann, ".pdf"), width=wid, height=hei)
 	for (dist.name in dist.names) {
-
+		
 		df <- data.obj$meta.dat
 		dist.sub <- dist.obj[[dist.name]]
 		dend <- hclust(as.dist(dist.sub), cluster.method)
@@ -1913,7 +1965,7 @@ generate_clustering <- function(data.obj, dist.obj, dist.names=c('UniFrac', 'GUn
 			}
 		}
 		colnames(mat) <- meta.info
-
+		
 		par(oma = c(1, 2, 1, 2))
 		par(mar = c(5,4,4,3)+0.1)  # make space for color keys
 		if (is.labRow == F) {
@@ -1944,29 +1996,43 @@ generate_clustering <- function(data.obj, dist.obj, dist.names=c('UniFrac', 'GUn
 	dev.off()
 }
 
+
+# Rev: 2016_09_10, Implement p value based omnibus test
 PermanovaG2 <- function (formula, dat = NULL, ...) 
 {
 	save.seed <- get(".Random.seed", .GlobalEnv)
 	lhs <- formula[[2]]
 	lhs <- eval(lhs, dat, parent.frame())
 	rhs <- as.character(formula)[3]
-	f.perms <- -Inf
-	f.stat <- -Inf
+	p.perms <- list()
+	p.obs <- list()
 	for (i in 1:(dim(lhs)[3])) {
 		assign(".Random.seed", save.seed, .GlobalEnv)
 		Y <- as.dist(lhs[, , i])
 		formula2 <- as.formula(paste("Y", "~", rhs))
-		obj <- adonis2(formula2, dat, ...)
-		f.perms <- ifelse(f.perms > obj$f.perms, f.perms, obj$f.perms)
-		temp <- obj$aov.tab[1:ncol(f.perms), "F.Model"]
-		f.stat <- ifelse(f.stat > temp, f.stat, temp)
+		obj <- adonis(formula2, dat, ...)
+		perm.mat <- obj$f.perms
+		p.perms[[i]] <- 1 - (apply(perm.mat, 2, rank) - 1) / nrow(perm.mat)
+		p.obs[[i]] <- obj$aov.tab[1:ncol(perm.mat), "Pr(>F)"]
+		
 	}
-	pv <- (rowSums(t(f.perms) >= f.stat) + 1)/(nrow(f.perms) + 
-				1)
-	aov.tab <- data.frame(F.Model = f.stat, p.value = pv)
-	rownames(aov.tab) <- rownames(obj$aov.tab)[1:ncol(f.perms)]
+	
+	omni.pv <- NULL
+	indiv.pv <- NULL
+	for (j in 1:ncol(perm.mat)) {
+		p.perms.j <- sapply(p.perms, function (x) x[, j])
+		p.obj.j <- sapply(p.obs, function (x) x[j])
+		omni.pv <- c(omni.pv, mean(c(rowMins(p.perms.j ) <= min(p.obj.j), 1)))
+		indiv.pv <- rbind(indiv.pv, p.obj.j)
+	}
+	colnames(indiv.pv) <- paste0('D', 1:ncol(indiv.pv), '.p.value')
+	rownames(indiv.pv) <- 1:nrow(indiv.pv)
+	
+	aov.tab <- data.frame(indiv.pv, omni.p.value = omni.pv)
+	rownames(aov.tab) <- rownames(obj$aov.tab)[1:ncol(perm.mat)]
 	list(aov.tab = aov.tab)
 }
+
 
 perform_permanova_test <- function (data.obj, dist.obj, dist.names=c('UniFrac', 'GUniFrac', 'WUniFrac', 'BC'), 
 		PermanovaG.dist=c('UniFrac',  'WUniFrac', 'BC'),
@@ -2005,7 +2071,7 @@ perform_permanova_test <- function (data.obj, dist.obj, dist.names=c('UniFrac', 
 			for (dist.name in PermanovaG.dist) {
 				response[, , dist.name] <- as.dist(dist.obj[[dist.name]][ind, ind])
 			}
-			obj <- PermanovaG(as.formula(paste("response", formula)), df,  strata=strata, ...)
+			obj <- PermanovaG2(as.formula(paste("response", formula)), df,  strata=strata, ...)
 			prmatrix(obj$aov.tab)
 			cat("\n")
 		}
@@ -2045,7 +2111,7 @@ perform_permanova_test <- function (data.obj, dist.obj, dist.names=c('UniFrac', 
 				for (dist.name in PermanovaG.dist) {
 					response[, , dist.name] <- dist.obj[[dist.name]][ind, ind]
 				}
-				obj <- PermanovaG(as.formula(paste("response", formula)), df,  strata=strata, ...)
+				obj <- PermanovaG2(as.formula(paste("response", formula)), df,  strata=strata, ...)
 				prmatrix(obj$aov.tab)
 				cat("\n")
 			}
@@ -2099,7 +2165,7 @@ perform_permanova_test <- function (data.obj, dist.obj, dist.names=c('UniFrac', 
 						}
 						prmatrix(obj$aov.tab)
 						cat("\n")
-	
+						
 						if (block.perm == F) {
 							pmat[i, j] <- pmat[j, i] <- obj$aov.tab[length(adj.name)+1, 6]
 							rmat[i, j] <- rmat[j, i] <- obj$aov.tab[length(adj.name)+1, 5]
@@ -2177,7 +2243,7 @@ perform_rf_test <- function (data.obj, grp.name, taxa.level='Genus', perm.no=999
 	
 	grp <- data.obj$meta.dat[, grp.name]
 	if (!is.factor(grp)) stop('Current random Forest test is designed to deal with binary factor data!\n')
-
+	
 	cat('RF test P values  ...\n')
 	obj <- randomForestTest(prop, grp, perm.no, ...)
 	sink(paste0('OverallAssoc_RF_test_', taxa.level, '_', ann, '.txt'))
@@ -2343,7 +2409,7 @@ distance_compare_test <- function (dist.mat, ind1, ind2, ind3, ID2=NULL, ID3=NUL
 					ind2.p <- ind23[ID23 %in% ID2.p]
 					ind3.p <- ind23[ID23 %in% ID3.p]
 				}
-
+				
 				dist12.p <- dist.mat[ind1, ind2.p]
 				dist13.p <- dist.mat[ind1, ind3.p]
 				mean(dist12.p) - mean(dist13.p)
@@ -2424,9 +2490,9 @@ perform_taxa_compare_test <- function (data.obj, grp.name, level1, level2, level
 	
 	for (LOI in taxa.levels) {
 		pv.vec <- pv.list[[LOI]]
-
+		
 		qv.vec <- p.adjust(pv.vec, 'fdr')
-
+		
 		
 		write.csv(data.frame("p value"=pv.vec, "q value"=qv.vec), paste0("Taxa_TrendAnalysis_", LOI, ".csv"))
 	}
@@ -2752,7 +2818,7 @@ taxa_barplot_aggregate <- function (prop, df, grp.name, strata=NULL, scale='sqrt
 		prop[prop <= cutoff] <- cutoff
 	}
 	
-    grp <- factor(df[, grp.name])
+	grp <- factor(df[, grp.name])
 	
 	if (is.null(strata)) {
 		df2 <- data.frame(Group=grp, t(prop))
@@ -2761,7 +2827,7 @@ taxa_barplot_aggregate <- function (prop, df, grp.name, strata=NULL, scale='sqrt
 		
 		# Could be revised
 		temp1 <- aggregate(Value ~ Group + Taxa, df2, mean)
-
+		
 		if (error == 'se') {
 			temp2 <- aggregate(Value ~ Group + Taxa, df2, function(x) sd(x) / sqrt(length(x)))
 		}
@@ -2865,7 +2931,7 @@ taxa_boxplot_aggregate <- function (prop, df, grp.name, strata=NULL, scale='none
 		df2 <- melt(df2)
 		colnames(df2) <- c('Group', 'Taxa', 'Value')
 		
-
+		
 		dodge <- position_dodge(width=0.95)
 		
 		obj1 <- ggplot(df2, aes(x=Taxa, y=Value, fill=Group)) + 
@@ -2925,8 +2991,8 @@ taxa_boxplot_aggregate <- function (prop, df, grp.name, strata=NULL, scale='none
 
 generate_taxa_biplot <- function (data.obj, taxa, trans='sqrt', grp.name, ann='', ...) {
 	
-    grp <- data.obj$meta.dat[, grp.name]
-
+	grp <- data.obj$meta.dat[, grp.name]
+	
 	prop <- NULL
 	for (LOI2 in names(data.obj$abund.list)) {
 		ct <- data.obj$abund.list[[LOI2]]
@@ -2966,24 +3032,24 @@ generate_taxa_barplot_aggregate <- function (data.obj,  grp.name, strata=NULL, s
 		cat(LOI, "\n")
 		prop <- data.obj$abund.list[[LOI]]
 		prop <- t(t(prop) / colSums(prop))
-				
+		
 		if (taxa.name == 'All') {
 			prop <- prop[rowMaxs(prop) > minp & rowSums(prop!=0) > prev*ncol(prop), , drop=FALSE]
 		} else {
 			prop <- prop[taxa.name, , drop=FALSE]
 		}
-			
+		
 		# decreasing
 		prop <- prop[rev(order(rowMeans(prop))), ]
 		
 		if (is.null(wids) | is.null(heis)) {
 			wid <- 7 * ifelse(nrow(prop) / 30 < 1, 1, nrow(prop) / 30)
-	        hei <- 7
+			hei <- 7
 		} else {
 			wid <- wids[i]
 			hei <- heis[i]
 		}
-			
+		
 		pdf(paste("Taxa_Barplot_Aggregate", LOI, scale, ann, ".pdf", sep="_"), height=hei, width=wid)		
 		obj1 <- taxa_barplot_aggregate (prop, df, grp.name, strata, scale, xsize[i]) 
 		print(obj1)
@@ -3170,7 +3236,6 @@ generate_taxa_barplot <- function (data.obj,  grp.name, strata=NULL, scale='P', 
 }
 
 
-
 twopart.test <- function(x1, x2, zero.p=0.2) {
 	
 	n1 <- length(x1)
@@ -3231,7 +3296,7 @@ permute_differential_analysis <- function (meta.dat, prop, grp.name, adj.name=NU
 	} else {
 		Y <- prop
 	}
-
+	
 	if (resid.perm) {
 		# Permute the residual
 		if (is.null(adj.name)) {
@@ -3239,7 +3304,7 @@ permute_differential_analysis <- function (meta.dat, prop, grp.name, adj.name=NU
 		} else {
 			Y <- t(resid(lm(as.formula(paste('t(Y) ~ ', adj.name)), meta.dat)))
 		}
-
+		
 	}
 	
 	n <- ncol(prop)
@@ -3257,7 +3322,7 @@ permute_differential_analysis <- function (meta.dat, prop, grp.name, adj.name=NU
 	
 	
 #	P0 <- M0 %*% solve(t(M0) %*% M0) %*% t(M0)
-		
+	
 	df1 <- meta.dat[, c(adj.name, grp.name), drop=F]
 	M1 <- model.matrix( ~., df1)
 	
@@ -3274,7 +3339,7 @@ permute_differential_analysis <- function (meta.dat, prop, grp.name, adj.name=NU
 #	F0 <- diag(Y %*% (P1 - P0) %*% t(Y)) / diag(Y %*% (I - P1) %*% t(Y))
 #	df3 <- df1
 	
-
+	
 	p <- vegan:::getPermuteMatrix(perm.no, n, strata = strata)
 	perm.no <- nrow(p)
 	
@@ -3322,6 +3387,8 @@ perform_differential_analysis <- function (data.obj, method=NULL, grp.name, adj.
 		cat('Automatic rarefaction to the minimum seqence depth is performed!\n')
 #		cat("For parametric test with sequence depth adjustment (DESeq2), please be cautious about the results!\n There may be potential residual sequence depth confounding!\n")
 		# potential revising
+		
+		# Causes prolbem for visualization (the names changed?)
 		otu.tab <- t(Rarefy(t(data.obj$otu.tab))$otu.tab.rff)
 		data.obj <- subset_data(data.obj, colnames(otu.tab))
 		data.obj$otu.tab <- otu.tab
@@ -3331,8 +3398,10 @@ perform_differential_analysis <- function (data.obj, method=NULL, grp.name, adj.
 			if (hierach != 'Species') {
 				if (hierach != 'Phylum') {
 					tax.family <- paste(otu.name[, 'Phylum'], otu.name[, hierach], sep=";")
+					tax.family[grepl('unclassified', tax.family, ignore.case=T)] <- paste0('Unclassified_', hierach)
 				} else {
 					tax.family <- otu.name[, 'Phylum']
+					tax.family[grepl('unclassified', tax.family, ignore.case=T)] <- 'Unclassified_Phylum'
 				}
 				family <- aggregate(otu.tab, by=list(tax.family), FUN=sum)
 				rownames(family) <- family[, 1]
@@ -3343,7 +3412,7 @@ perform_differential_analysis <- function (data.obj, method=NULL, grp.name, adj.
 			}
 		}
 	}
-
+	
 	
 	if (is.factor(grp)) {
 		if (is.null(method)) {
@@ -3362,12 +3431,12 @@ perform_differential_analysis <- function (data.obj, method=NULL, grp.name, adj.
 				temp1 <- which(as.numeric(grp) == 1 & subject == sub)
 				temp2 <- which(as.numeric(grp) == 2 & subject == sub)
 				if (length(temp1) != 0 & length(temp2) != 0) {
-					ind1 <- c(ind1, temp1)
-					ind2 <- c(ind2, temp2)
+					ind1 <- c(ind1, temp1[1])
+					ind2 <- c(ind2, temp2[1])
 				}
 				
 			}
-		#	if (length(ind1) != length(ind2))  warning('Some subjects are not paired!\n')
+			#	if (length(ind1) != length(ind2))  warning('Some subjects are not paired!\n')
 		}
 		
 		if (method == 'perm.pair') {
@@ -3406,7 +3475,7 @@ perform_differential_analysis <- function (data.obj, method=NULL, grp.name, adj.
 #				pv.de2 <- res[, 'pvalue']
 #				names(pv.de2) <- rownames(res)
 #			}
-			 		
+			
 			if (method == 'perm') {
 				set.seed(seed)
 				pv.de2 <- permute_differential_analysis(df, prop, grp.name, adj.name, ...)
@@ -3548,7 +3617,7 @@ perform_differential_analysis <- function (data.obj, method=NULL, grp.name, adj.
 #				dds <- DESeq(dds)
 #				res <- results(dds)
 #				pv.de2 <- res[, 'pvalue']
-##				fc.de2 <- res[, 'log2FoldChange']
+			##				fc.de2 <- res[, 'log2FoldChange']
 #			# May need to revise
 #				fc.de2 <- sapply(1:nrow(prop), function(i) cor(prop[i, ], df[, grp.name], method='spearman'))
 #				names(pv.de2) <- rownames(res)
@@ -3622,65 +3691,124 @@ perform_differential_analysis <- function (data.obj, method=NULL, grp.name, adj.
 #		data=Owls, 
 #		zeroInflation=TRUE, 
 #		family="nbinom")
+confint.lme <- function (object, parm, level = 0.95, ...) 
+{
+	cf <- fixed.effects(object)
+	pnames <- names(cf)
+	if (missing(parm)) 
+		parm <- pnames
+	else if (is.numeric(parm)) 
+		parm <- pnames[parm]
+	a <- (1 - level)/2
+	a <- c(a, 1 - a)
+	pct <- stats:::format.perc(a, 3)
+	fac <- qnorm(a)
+	ci <- array(NA, dim = c(length(parm), 2L), dimnames = list(parm, 
+					pct))
+	ses <- sqrt(diag(vcov(object)))[parm]
+	ci[] <- cf[parm] + ses %o% fac
+	ci
+}
 
-perform_differential_analysis_para_single_RE <- function (taxon, ldep, grp.name, adj.name=NULL, subject=NULL, df, method='NB', LRT=FALSE) {
+
+# Rev: 2016_09_13 add glmmPQL-based overdipersed Poisson and binomial model
+# glmmPQL default has overdispersion parameter. Regular Poisson and Binomial does not work.
+perform_differential_analysis_para_single_RE <- function (taxon, ldep, grp.name, adj.name=NULL, subject, df, method='NB', LRT=FALSE) {
 	# ldep: log depth (size factor)
-	if (!is.null(adj.name) || !is.null(subject)) {
-		if (sum(grepl(grp.name, c(adj.name, subject, 'ldep')))) {
-			stop('grp.name could not be part of adj.name or subject, or there will be problem!\n')
+	if (!is.null(adj.name) ) {
+		if (sum(grepl(grp.name, c(adj.name)))) {
+			stop('grp.name could not be part of adj.name, or there will be problem!\n')
 		}
 	}
+	
+	if (is.null(subject)) {
+		stop('Random effects model require the specification of the subject parameter!\n')
+	}	
 	
 	df$ldep <- ldep
 	df$taxon <- taxon
 	if (LRT) warning('Currently, only Wald test is implemented!\n')
 	
-	if (is.null(adj.name) & is.null(subject)) {
-		grp.name.adj.name.subject <- grp.name
-	} else {
-		if (is.null(subject)) {
-			grp.name.adj.name.subject <- paste(grp.name, '+', adj.name)
+	
+	if (method %in% c('NB', 'ZINB1', 'ZINB0', 'B0')) {
+		if (is.null(adj.name)) {
+			grp.name.adj.name.subject <- grp.name.adj.name.subject <- paste(grp.name,  '+ (1|', subject, ')')
 		} else {
-			if (grepl('\\|', subject)) {
-				grp.name.adj.name.subject <- paste(grp.name, '+', adj.name, '+ (', subject, ')')
-			} else {
-				grp.name.adj.name.subject <- paste(grp.name, '+', adj.name, '+ (1|', subject, ')')
-			}
+			
+			grp.name.adj.name.subject <- paste(grp.name, '+', adj.name, '+ (1|', subject, ')')
 		}
+		
+		if (method == 'NB') {
+			m1.nb <- glmmadmb(as.formula(paste('taxon ~', grp.name.adj.name.subject, '+ offset(ldep)')), data = df, 
+					zeroInflation=FALSE, family='nbinom')
+		}
+		
+		# 'B0' uses the glmmadmb, which will be compared to 'B' method of glmmPQL
+		if (method == 'B0') {
+			taxon2 <- as.numeric(taxon != 0)
+			df$taxon2 <- taxon2
+			m1.nb <- glmmadmb(as.formula(paste('taxon2 ~', grp.name.adj.name.subject, '+ ldep')), data = df, 
+					zeroInflation=FALSE, family='binomial')
+		}
+		
+		if (method == 'ZINB1') {
+			m1.nb <- glmmadmb(as.formula(paste('taxon ~', grp.name.adj.name.subject, '+ offset(ldep)')), data = df, 
+					zeroInflation=TRUE, family='nbinom')
+		}
+		
+		if (method == 'ZINB0') {
+			m1.nb <- glmmadmb(as.formula(paste('taxon ~', grp.name.adj.name.subject, '+ offset(ldep)')), data = df, 
+					zeroInflation=TRUE, family='truncnbinom')
+		}
+		
+		code <- list(m1.conv=m1.nb$convmsg)	
+		pv.nb <- wald.test(b = coef(m1.nb), Sigma = vcov(m1.nb), Terms = grep(grp.name, names(coef(m1.nb))))$result$chi2['P']
+		method <- paste(method, 'Wald')
+		
+		
+		aic.nb <- -2 * m1.nb$loglik + 2 * m1.nb$npar	
+		coef.nb <- coef(m1.nb)
+		ci.nb <- confint.default(m1.nb)
+	} 
+	
+	if (method %in% c('OP', 'B', 'QB')) {
+		if (is.null(adj.name)) {
+			grp.name.adj.name <- grp.name
+		} else {
+			grp.name.adj.name <- paste(grp.name, '+', adj.name)
+		}
+		
+		subject <- paste('~ 1 |', subject)
+		if (method == 'OP') {
+			m1.nb <- glmmPQL(as.formula(paste('taxon ~', grp.name.adj.name, '+ offset(ldep)')), random = as.formula(subject), data = df, 
+					verbose=F, family=quasipoisson())
+		}
+		
+		# 'B0' uses the glmmadmb, which will be compared to 'B' method of glmmPQL
+		if (method == 'B') {
+			taxon2 <- as.numeric(taxon != 0)
+			df$taxon2 <- taxon2
+			m1.nb <- glmmPQL(as.formula(paste('taxon2 ~', grp.name.adj.name, '+ ldep')),  random = as.formula(subject), data = df, 
+					verbose=F, family=binomial)
+		}
+		
+		if (method == 'QB') {
+			taxon2 <- as.numeric(taxon != 0)
+			df$taxon2 <- taxon2
+			m1.nb <- glmmPQL(as.formula(paste('taxon2 ~', grp.name.adj.name, '+ ldep')),  random = as.formula(subject), data = df, 
+					verbose=F, family=quasibinomial())
+		}
+		
+		pv.nb <- wald.test(b = fixed.effects(m1.nb), Sigma = vcov(m1.nb), Terms = grep(grp.name, names(coef(m1.nb))))$result$chi2['P']
+		method <- paste(method, 'Wald')
+		code <- NA   # placeholder
+		aic.nb <- NA # NA placeholder
+		coef.nb <- fixed.effects(m1.nb)
+		ci.nb <- confint.lme(m1.nb)
+		
 	}
-	if (method == 'NB') {
-		m1.nb <- glmmadmb(as.formula(paste('taxon ~', grp.name.adj.name.subject, '+ offset(ldep)')), data = df, 
-				zeroInflation=FALSE, family='nbinom')
-	}
 	
-	if (method == 'B') {
-		taxon2 <- as.numeric(taxon != 0)
-		df$taxon2 <- taxon2
-		m1.nb <- glmmadmb(as.formula(paste('taxon2 ~', grp.name.adj.name.subject, '+ ldep')), data = df, 
-				zeroInflation=FALSE, family='binomial')
-	}
-	
-	if (method == 'ZINB1') {
-		m1.nb <- glmmadmb(as.formula(paste('taxon ~', grp.name.adj.name.subject, '+ offset(ldep)')), data = df, 
-				zeroInflation=TRUE, family='nbinom')
-	}
-	
-	if (method == 'ZINB0') {
-		m1.nb <- glmmadmb(as.formula(paste('taxon ~', grp.name.adj.name.subject, '+ offset(ldep)')), data = df, 
-				zeroInflation=TRUE, family='truncnbinom')
-	}
-	
-	code <- list(m1.conv=m1.nb$convmsg)	
-	pv.nb <- wald.test(b = coef(m1.nb), Sigma = vcov(m1.nb), Terms = grep(grp.name, names(coef(m1.nb))))$result$chi2['P']
-	method <- paste(method, 'Wald')
-	
-	
-	aic.nb <- -2 * m1.nb$loglik + 2 * m1.nb$npar
-	
-	coef.nb <- coef(m1.nb)
 	fc.nb <- coef.nb[grep(grp.name, names(coef.nb))]
-	
-	ci.nb <- confint.default(m1.nb)
 	obj <- ci.nb[grep(grp.name, rownames(ci.nb)), ]
 	
 	if (is.vector(obj)) {
@@ -3692,6 +3820,7 @@ perform_differential_analysis_para_single_RE <- function (taxon, ldep, grp.name,
 		names(fc.lc.nb) <- paste(names(fc.lc.nb), '2.5%')
 		names(fc.uc.nb) <- paste(names(fc.uc.nb), '97.5%')
 	}
+	
 	return(list(method=method, pv=pv.nb, lfc=fc.nb, lfc.lci=fc.lc.nb, lfc.uci=fc.uc.nb, aic=aic.nb, code=code))
 }
 
@@ -3699,10 +3828,14 @@ perform_differential_analysis_para_single_RE <- function (taxon, ldep, grp.name,
 
 perform_differential_analysis_para_single_FE <- function (taxon.abund, ldep, grp.name, adj.name=NULL, subject=NULL, df, method='NB', LRT=FALSE) {
 	# ldep: log depth (size factor)
-	if (!is.null(adj.name) || !is.null(subject)) {
-		if (sum(grepl(grp.name, c(adj.name, subject, 'ldep')))) {
+	if (!is.null(adj.name)) {
+		if (sum(grepl(grp.name, c(adj.name)))) {
 			stop('grp.name could not be part of adj.name or subject, or there will be problem!\n')
 		}
+	}
+	
+	if (!is.null(subject)) {
+		warnings('Fixed effects model will ignore the subject variable! Please use randome effects model!\n')
 	}
 	if (LRT & method == 'OP') warning('Overdispersed Poisson does not support LRT! Wald test used!\n')
 	
@@ -3723,7 +3856,7 @@ perform_differential_analysis_para_single_FE <- function (taxon.abund, ldep, grp
 			pv.nb <- wald.test(b = coef(m1.nb), Sigma = vcov(m1.nb), Terms = grep(grp.name, names(coef(m1.nb))))$result$chi2['P']
 			method <- paste(method, 'Wald')
 		}
-
+		
 		aic.nb <- summary(m1.nb)$aic
 		
 		coef.nb <- coef(m1.nb)
@@ -3756,7 +3889,36 @@ perform_differential_analysis_para_single_FE <- function (taxon.abund, ldep, grp
 			pv.b <- wald.test(b = coef(m1.b), Sigma = vcov(m1.b), Terms = grep(grp.name, names(coef(m1.b))))$result$chi2['P']
 			method <- paste(method, 'Wald')
 		}
-
+		
+		aic.b <- summary(m1.b)$aic
+		coef.b <- coef(m1.b)
+		fc.b <- coef.b[grep(grp.name, names(coef.b))]
+		
+		ci.b <- confint.default(m1.b)
+		obj <- ci.b[grep(grp.name, rownames(ci.b)), ]
+		
+		if (is.vector(obj)) {
+			fc.lc.b <- obj[1]
+			fc.uc.b <- obj[2]
+		} else {
+			fc.lc.b <- obj[, 1]
+			fc.uc.b <- obj[, 2]
+			names(fc.lc.b) <- paste(names(fc.lc.b), '2.5%')
+			names(fc.uc.b) <- paste(names(fc.uc.b), '97.5%')
+		}
+		return(list(method=method, pv=pv.b, lfc=fc.b, lfc.lci=fc.lc.b, lfc.uci=fc.uc.b, aic=aic.b, code=code))
+	}
+	
+	# Rev: 2016_09_13 add 'QB', No likelihood ratio test
+	if (method == 'QB') {
+		taxon.abund2 <- as.numeric(taxon.abund != 0)
+		m1.b <- glm(as.formula(paste('taxon.abund2 ~', grp.name.adj.name, '+ ldep')), data = df, family=quasibinomial)
+		
+		code <- list(m1.conv=m1.b$converged, m1.bound=m1.b$boundary)	
+		pv.b <- wald.test(b = coef(m1.b), Sigma = vcov(m1.b), Terms = grep(grp.name, names(coef(m1.b))))$result$chi2['P']
+		method <- paste(method, 'Wald')
+		
+		
 		aic.b <- summary(m1.b)$aic
 		coef.b <- coef(m1.b)
 		fc.b <- coef.b[grep(grp.name, names(coef.b))]
@@ -3780,7 +3942,7 @@ perform_differential_analysis_para_single_FE <- function (taxon.abund, ldep, grp
 		# No LRT
 		m1.op <- glm(as.formula(paste('taxon.abund ~', grp.name.adj.name)), offset=ldep, data = df, family=quasipoisson)
 		code <- list(m1.conv=m1.op$converged, m1.bound=m1.op$boundary)
-
+		
 		# pv.op <- pchisq(2 * (logLik(m1.op) - logLik(m0.op)), df = df.residual(m0.op) - df.residual(m1.op), lower.tail=FALSE) # LRT not applicable
 		coef.op <- coef(m1.op)		
 		pv.op <- wald.test(b = coef.op, Sigma = vcov(m1.op), Terms = grep(grp.name, names(coef.op)))$result$chi2['P']
@@ -3907,7 +4069,7 @@ perform_differential_analysis_para_single_FE <- function (taxon.abund, ldep, grp
 			pv2.zinb <- wald.test(b = coef(m2.zinb), Sigma = vcov(m2.zinb), Terms = grep(grp.name, names(coef(m2.zinb))))$result$chi2['P']
 			method <- paste(method, 'Wald')
 		}
-
+		
 		aic2.zinb <- -2 * logLik(m2.zinb) + 2 * (m2.zinb$n - m2.zinb$df.residual)
 		
 		coef.zinb <- coef(m2.zinb)
@@ -3927,26 +4089,26 @@ perform_differential_analysis_para_single_FE <- function (taxon.abund, ldep, grp
 		}
 		return(list(method=method, pv=pv2.zinb, lfc=fc2.zinb, lfc.lci=fc2.lc.zinb, lfc.uci=fc2.uc.zinb, aic=aic2.zinb, code=code))
 	}
-
+	
 }
 
-
-perform_differential_analysis_para <- function (data.obj,  grp.name, adj.name=NULL, subject=NULL, RE=FALSE, method='Adaptive1', ZINB='ZINB1', LRT=FALSE, 
-		taxa.levels=c('Phylum', 'Order', 'Class', 'Family', 'Genus'), winsor=TRUE, winsor.qt=0.95, norm='GMPR', intersect.no=4,
+# Rev: 2016_09_14 Add Adaptive 0: switch OP and QB depending on the number of zeros. 
+perform_differential_analysis_para <- function (data.obj,  grp.name, adj.name=NULL, subject=NULL, RE=FALSE, method='Adaptive0', zerop.cutoff=0.25, ZINB='ZINB1', LRT=FALSE, 
+		taxa.levels=c('Phylum', 'Order', 'Class', 'Family', 'Genus'), winsor=TRUE, winsor.qt=0.97, norm='GMPR', norm.level='Genus', intersect.no=4,
 		prev=0.1, minp=0.002, medianp=NULL, mt.method='fdr', cutoff=0.15, ann='', ...) {
 	# To be completed
 	# subject holds the random effects formula
 	if (!RE) {
-		if (!(method %in% c('ZINB', 'B', 'NB', 'OP', 'Adaptive1', 'Adaptive2'))) stop('The speficied model is not supported!\n')
+		if (!(method %in% c('ZINB', 'B', 'QB', 'NB', 'OP', 'Adaptive0', 'Adaptive1', 'Adaptive2'))) stop('The speficied model is not supported!\n')
 		perform_differential_analysis_para_single <- perform_differential_analysis_para_single_FE
 		if (!is.null(subject)) warning('subject will not be used. Are you sure you want to run fixed effects model? ')
 	} else {
-		if (!(method %in% c('ZINB', 'B', 'NB', 'Adaptive1', 'Adaptive2'))) stop('The speficied model does not have random effects implementation!\n')
+		if (!(method %in% c('ZINB', 'B', 'B0', 'QB', 'NB', 'OP', 'Adaptive0', 'Adaptive1', 'Adaptive2'))) stop('The speficied model does not have random effects implementation!\n')
 		if (ZINB != 'ZINB1') stop('Currently only ZINB1 is supported!\n')
 		if (is.null(subject)) warning('subject is not supplied. Fixed effects model will be used instead!\n')
 		perform_differential_analysis_para_single <- perform_differential_analysis_para_single_RE
 	}
-
+	
 	df <- data.obj$meta.dat
 	grp <- df[, grp.name]
 	
@@ -3973,22 +4135,25 @@ perform_differential_analysis_para <- function (data.obj,  grp.name, adj.name=NU
 	pv.list <- qv.list <-  fc.list <- fc.lc.list <- fc.uc.list <- met.list <- list()
 	res.final <- NULL
 	
+	if (norm == 'Precalculated') {
+		dep <- data.obj$size.factor
+	}
 	if (norm == 'GMPR') {
-		dep <- GMPR(data.obj$abund.list[['Genus']], intersect.no)
+		dep <- GMPR(data.obj$abund.list[[norm.level]], intersect.no)
 	}
 	
 	if (norm == 'TSS') {
-		dep <- colSums(data.obj$abund.list[['Genus']])
+		dep <- colSums(data.obj$abund.list[[norm.level]])
 	}
 	
 	ldep <- log(dep)
 	
 	for (LOI in taxa.levels) {
 		cat(LOI, "\n")
-
+		
 		taxon.ct <- data.obj$abund.list[[LOI]]
 		
-
+		
 		if (winsor == TRUE) {
 			# Addressing the outlier (97% percent) or at least one outlier
 			
@@ -4015,7 +4180,7 @@ perform_differential_analysis_para <- function (data.obj,  grp.name, adj.name=NU
 			prop <- prop[nz.mean > medianp & rowSums(prop!=0) > prev*ncol(prop), , drop=FALSE]	
 			taxon.ct <- taxon.ct[rownames(prop), , drop=FALSE]
 		}
-			
+		
 		pv.vec <-  fc.vec <- fc.lc.vec <- fc.uc.vec <- met.vec <- conv.vec <- NULL
 		obj <- NULL
 		for (taxon in rownames(taxon.ct)) {
@@ -4023,17 +4188,31 @@ perform_differential_analysis_para <- function (data.obj,  grp.name, adj.name=NU
 			taxon.abund <- taxon.ct[taxon, ]
 			
 			######## Logistic regression ###############
-			if (method == 'B') error <- try(obj <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method='B', LRT)) 
+			if (method == 'B0') error <- try(obj <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method='B0', LRT, ...)) 
+			if (method == 'B') error <- try(obj <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method='B', LRT, ...)) 
+			if (method == 'QB') error <- try(obj <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method='QB', LRT, ...)) 
 			######## Overdispersed Poisson regression #########	
-			if (method == 'OP') error <- try(obj <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method='OP', LRT)) 
+			if (method == 'OP') error <- try(obj <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method='OP', LRT, ...)) 
 			######## Negative binomial regression #########
-			if (method == 'NB') error <- try(obj <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method='NB', LRT))
+			if (method == 'NB') error <- try(obj <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method='NB', LRT, ...)) 
 			######## Zeroinflated negbinomial regression 1 ########
-			if (method == 'ZINB') error <- try(obj <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method=ZINB, LRT)) 
+			if (method == 'ZINB') error <- try(obj <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method=ZINB, LRT, ...)) 
 			
+			# Adpative 0 selects OP and QB based on the zero proportion (Not optimal)
+			if (method == 'Adaptive0') {
+				temp <- mean(as.numeric(taxon.abund != 0))
+				
+				if (temp > zerop.cutoff) {
+					error <- try(obj <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method='QB', LRT, ...)) 
+				} else {
+					error <- try(obj <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method='OP', LRT, ...)) 
+				}
+			}
+			
+			# Adpative 1 selects NB and ZIB based on AIC
 			if (method == 'Adaptive1') {
-				error1 <- try(obj1 <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method='NB', LRT))
-				error2 <- try(obj2 <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method=ZINB, LRT))
+				error1 <- try(obj1 <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method='NB', LRT, ...)) 
+				error2 <- try(obj2 <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method=ZINB, LRT, ...)) 
 				if (class(error1) != 'try-error' & class(error2) != 'try-error') {
 					if (obj1$aic < obj2$aic) {
 						obj <- obj1
@@ -4057,11 +4236,12 @@ perform_differential_analysis_para <- function (data.obj,  grp.name, adj.name=NU
 				}	
 			}
 			
+			# Adaptive 2 starts with NB model, if it fails, it switches ZINB
 			if (method == 'Adaptive2') {
-				error1 <- try(obj1 <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method='NB', LRT))
+				error1 <- try(obj1 <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method='NB', LRT, ...)) 
 				
 				if (class(error1) == 'try-error' | obj1$pv == 0) {
-					error2 <- try(obj2 <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method=ZINB, LRT))
+					error2 <- try(obj2 <- perform_differential_analysis_para_single(taxon.abund, ldep, grp.name, adj.name, subject, df, method=ZINB, LRT, ...)) 
 					if (class(error2) != 'try-error') {
 						obj <- obj2
 						error <- error2
@@ -4078,10 +4258,12 @@ perform_differential_analysis_para <- function (data.obj,  grp.name, adj.name=NU
 			# Random Effects model 
 			# ZINB, B, NB, Adpative1 is implemented based on glmmADMB
 			
-			
-			if (class(error) == "try-error") {
+			# Set P value NA for those not makes sense
+			if (class(error) == "try-error" | abs(obj$lfc) > 100) {
 				obj$pv <- obj$lfc <- obj$lfc.lci <- obj$lfc.uci <- obj$method <- NA
 			}
+			
+			
 			pv.vec <- rbind(pv.vec, obj$pv)
 			fc.vec <- rbind(fc.vec, obj$lfc)
 			fc.lc.vec <- rbind(fc.lc.vec, obj$lfc.lci)
@@ -4090,14 +4272,14 @@ perform_differential_analysis_para <- function (data.obj,  grp.name, adj.name=NU
 			
 		}
 		cat('\n')
-
+		
 		qv.vec <- matrix(p.adjust(pv.vec[, 1], 'fdr'), ncol=1)
 		
 		rownames(pv.vec) <- rownames(qv.vec) <- rownames(fc.vec) <- rownames(fc.uc.vec) <- rownames(fc.lc.vec) <- rownames(met.vec) <- rownames(prop)
 		colnames(pv.vec) <- 'Pvalue'
 		colnames(qv.vec) <- 'Qvalue'
-        colnames(met.vec) <- 'Method'
-
+		colnames(met.vec) <- 'Method'
+		
 		
 		pv.list[[LOI]] <- pv.vec
 		qv.list[[LOI]] <- qv.vec
@@ -4105,7 +4287,7 @@ perform_differential_analysis_para <- function (data.obj,  grp.name, adj.name=NU
 		fc.lc.list[[LOI]] <- fc.lc.vec
 		fc.uc.list[[LOI]] <- fc.uc.vec
 		met.list[[LOI]] <- met.vec
- 
+		
 		res <- cbind(pv.vec, qv.vec, fc.vec, fc.lc.vec, fc.uc.vec, met.vec)
 		rownames(res) <- rownames(prop)
 		write.csv(res, paste0("Taxa_DifferentialAbundanceAnalysis_", LOI, "_", ann, ".csv"))
@@ -4144,7 +4326,7 @@ plot_effect_size <- function (month,  value, pos.lab, neg.lab, ylab, hjust1=1.3,
 }
 
 
-plot_effect_size2 <- function (fold.dat.plot1, ylabel='log2(Fold change)', is.ln=TRUE, ord=TRUE) {
+plot_effect_size2 <- function (fold.dat.plot1, ylabel='log(Fold change)', is.ln=TRUE, ord=TRUE) {
 	
 	if (is.ln) {
 		fold.dat.plot1[, c('Estimate', 'LCI', 'UCI')] <- fold.dat.plot1[, c('Estimate', 'LCI', 'UCI')] * log2(exp(1))
@@ -4179,7 +4361,7 @@ plot_effect_size2 <- function (fold.dat.plot1, ylabel='log2(Fold change)', is.ln
 
 
 visualize_differential_analysis <- function (data.obj, diff.obj,  grp.name=NULL, strata=NULL, test='Nonpara', mt.method='fdr', scale='sqrt', cutoff=0.15,
-		taxa.levels=c('Phylum', 'Family', 'Genus'), ord=TRUE, eff.type='logP',
+		taxa.levels=c('Phylum', 'Family', 'Genus'), ord=TRUE, eff.type='logP', indivplot=TRUE,
 		xsize=10, ann='', hei1=NULL, wid1=NULL, hei2=NULL, wid2=NULL) {
 	
 	# uniquefy names
@@ -4349,9 +4531,12 @@ visualize_differential_analysis <- function (data.obj, diff.obj,  grp.name=NULL,
 		}
 		if (!is.null(grp.name)) {
 			# Individual plots
-			generate_taxa_boxplot(data.obj, grp.name=grp.name, taxa.levels='All', taxa.name=taxa.names, ann=paste0(mt.method, '_', cutoff, '_', ann))
-			generate_taxa_boxplot(data.obj, grp.name=grp.name, taxa.levels='All', taxa.name=taxa.names, scale='binary', ann=paste0(mt.method, '_', cutoff, '_', ann))
-			generate_taxa_barplot(data.obj, grp.name=grp.name, taxa.levels='All', taxa.name=taxa.names, ann=paste0(mt.method, '_', cutoff, '_', ann))
+			if (indivplot == TRUE) {
+				generate_taxa_boxplot(data.obj, grp.name=grp.name, taxa.levels='All', taxa.name=taxa.names, ann=paste0(mt.method, '_', cutoff, '_', ann))
+				generate_taxa_boxplot(data.obj, grp.name=grp.name, taxa.levels='All', taxa.name=taxa.names, scale='binary', ann=paste0(mt.method, '_', cutoff, '_', ann))
+				generate_taxa_barplot(data.obj, grp.name=grp.name, taxa.levels='All', taxa.name=taxa.names, ann=paste0(mt.method, '_', cutoff, '_', ann))
+			}
+			
 		}
 	}
 }
@@ -4366,7 +4551,7 @@ create_lefse_format <- function(data.obj, diff.obj, grp.name, mt.method='fdr', c
 	df <- data.obj$meta.dat
 	grp <- df[, grp.name]
 	levels(grp) <- paste0(1:nlevels(grp), levels(grp))
-
+	
 	qv.list <- diff.obj$qv.list
 	pv.list <- diff.obj$pv.list
 	m.list <- diff.obj$m.list
@@ -4408,7 +4593,7 @@ create_lefse_format <- function(data.obj, diff.obj, grp.name, mt.method='fdr', c
 			taxa.name <- rownames(qv.vec)[qv.vec <= cutoff]
 			abundant.grp.name <- apply(m.vec, 1, function(x) levels(grp)[which.max(x)])[qv.vec <= cutoff]
 		}
-
+		
 		if (mt.method == 'raw') {
 			taxa.name <- rownames(pv.vec)[pv.vec <= cutoff]
 			abundant.grp.name <- apply(m.vec, 1, function(x) levels(grp)[which.max(x)])[pv.vec <= cutoff]
@@ -4421,7 +4606,7 @@ create_lefse_format <- function(data.obj, diff.obj, grp.name, mt.method='fdr', c
 	}
 	
 	# remove 'unclassified'
-    abundant.grp.names <- abundant.grp.names[!grepl('unclassified', taxa.names, ignore.case=T)]
+	abundant.grp.names <- abundant.grp.names[!grepl('unclassified', taxa.names, ignore.case=T)]
 	taxa.names <- taxa.names[!grepl('unclassified', taxa.names, ignore.case=T)]
 	
 	taxa.names <- intersect(taxa.names, alias.a)
@@ -4448,11 +4633,11 @@ perform_lefse_analysis <- function (data.obj,  grp.name, sub.grp.name=NULL, prev
 	lefse.tab <- aggregate(otu.tab.12, by=list(tax.family), FUN=sum)
 	rownames(lefse.tab) <- lefse.tab[, 1]
 	lefse.tab <- as.matrix(lefse.tab [, -1])
-
+	
 	lefse.tab <- t(t(lefse.tab) / colSums(lefse.tab))
 	
 	lefse.tab <- lefse.tab[rowMaxs(lefse.tab) > minp & rowSums(lefse.tab!=0) > prev*ncol(lefse.tab), , drop=FALSE]
-
+	
 	if (is.null(sub.grp.name)) {
 		header <- rbind(class=as.character(meta.dat[colnames(lefse.tab), grp.name]), 
 				id=colnames(lefse.tab))
@@ -4461,7 +4646,7 @@ perform_lefse_analysis <- function (data.obj,  grp.name, sub.grp.name=NULL, prev
 				subclass=as.character(meta.dat[colnames(lefse.tab), sub.grp.name]), 
 				id=colnames(lefse.tab))
 	}
-
+	
 	
 	lefse.tab <- rbind(header, lefse.tab)
 	write.table(lefse.tab, "lefse.txt", sep="\t", col.names=F, quote=F)
@@ -4518,23 +4703,23 @@ createROC <- function (pv.list, lab.list, pos.lab='1', file.name='ROC.pdf') {
 	n <- length(pv.list)
 	aucs <- numeric(n)
 	names(aucs) <- names(pv.list)
-
+	
 	cols <- scales::hue_pal()(n)
 	ltys <- rep(c(1, 2), ceiling(n/2))[1:n]
 	pdf(file.name)
 	for (i in 1:n) {
 		
-  		    cat("*")
-			pv.mat <- pv.list[[i]]
-			lab.mat <- lab.list[[i]]
-			
-			pred <- prediction(pv.mat, lab.mat==pos.lab)
-			perf <- performance(pred, "tpr", "fpr")
-			aucs[i] <- mean(unlist(performance(pred, 'auc')@y.values))
-			plot(perf, avg="threshold", col=cols[i], lty=ltys[i], lwd=2,  add=ifelse(i==1, FALSE, TRUE),  main='ROC curve')
-				
-		}
-
+		cat("*")
+		pv.mat <- pv.list[[i]]
+		lab.mat <- lab.list[[i]]
+		
+		pred <- prediction(pv.mat, lab.mat==pos.lab)
+		perf <- performance(pred, "tpr", "fpr")
+		aucs[i] <- mean(unlist(performance(pred, 'auc')@y.values))
+		plot(perf, avg="threshold", col=cols[i], lty=ltys[i], lwd=2,  add=ifelse(i==1, FALSE, TRUE),  main='ROC curve')
+		
+	}
+	
 	legend("right", legend=paste0(names(pv.list), "(AUC:", round(aucs, 3), ")"), col=cols, lty=ltys, lwd=2,  bty="n")
 	dev.off()
 }
@@ -4545,7 +4730,6 @@ createROC <- function (pv.list, lab.list, pos.lab='1', file.name='ROC.pdf') {
 #pv.list <- list(x1=rnorm(100), x2=rnorm(100))
 #lab.list <- list(x1=invlogit(pv.list[['x1']]), x2=invlogit(pv.list[['x2']]))
 #createROC(pv.list, lab.list)
-
 
 predictionRF <- function (data.obj,  resp.name, formula=NULL, taxa.level='Species', binary=FALSE, prev=0.1, minp=0.002, B=50, seed=123, 
 		boruta.level=c('Confirmed', 'Tentative'), ann='',...) {
@@ -4862,10 +5046,10 @@ col.func <- colorRampPalette(c("blue", "cyan", "red", "yellow"))
 generate_taxa_heatmap <- function (data.obj, taxa.levels='Genus', taxa='All', meta.info, sam.ord=NULL, data.type='P',  prev=0.1, minp=0.002, 
 		row.col.dat='Phyla', phy.no=4, sepwidth=0.01, colsep=NULL, rowsep=NULL,
 		white='white', colFunc=jet, Rowv=T, Colv=T, dendrogram='both', margins=c(5, 15), in.grid=F, sepcolor='black', is.labCol=T, cexCol=1, cexRow=NULL,
-		omas=c(1, 1, 1, 8), width=12, height=6, ann='All') {
+		omas=c(1, 1, 1, 8), width=12, height=6, ann='All', return.obj=FALSE, ...) {
 	
 	df <- data.obj$meta.dat
-
+	
 	if ('Species' %in% taxa.levels & !('Species' %in% names(data.obj$abund.list))) {
 		data.obj$abund.list[['Species']] <- data.obj$otu.tab
 		rownames(data.obj$abund.list[['Species']]) <- paste0("OTU", rownames(data.obj$otu.tab), ":", 
@@ -4883,14 +5067,14 @@ generate_taxa_heatmap <- function (data.obj, taxa.levels='Genus', taxa='All', me
 				ct <- data.obj$abund.list[[LOI2]]
 				prop0 <- t(t(ct) / colSums(ct))
 				prop <- rbind(prop, prop0[intersect(rownames(prop0), taxa), , drop=FALSE])	
-	
+				
 			}
 			colnames(prop) <- colnames(prop0)
 			if (nrow(prop) != length(taxa)) {
 				warnings('Some taxa not found in abundance lists! Please check the names!\n')
 			}
 			
-  		} else {
+		} else {
 			ct <- data.obj$abund.list[[LOI]]
 			prop <- t(t(ct) / colSums(ct))
 			
@@ -4900,7 +5084,7 @@ generate_taxa_heatmap <- function (data.obj, taxa.levels='Genus', taxa='All', me
 				prop <- prop[rowMaxs(prop) > minp & rowSums(prop!=0) > prev*ncol(prop), , drop=FALSE]	
 			}			
 		}
-
+		
 		# Sort row and column
 		if (is.null(sam.ord)) {
 			prop <- prop[order(rownames(prop)), , drop=FALSE]
@@ -4926,8 +5110,8 @@ generate_taxa_heatmap <- function (data.obj, taxa.levels='Genus', taxa='All', me
 			minp <- min(prop[prop!=0])/1.1
 			prop[prop==0] <- minp
 			prop <- log10(prop)
-		#	breaks <- c(log10(minp)-0.01, seq(log10(minp)+0.01, 0, len=51))	
-	        breaks <- c(log10(minp)-0.01, seq(log10(minp)+0.01, 0, len=12))
+			#	breaks <- c(log10(minp)-0.01, seq(log10(minp)+0.01, 0, len=51))	
+			breaks <- c(log10(minp)-0.01, seq(log10(minp)+0.01, 0, len=12))
 		}
 		if (data.type == 'R'){
 			col.scheme <- c('white', colorRampPalette(c("green", "black", "red"))(ncol(prop)-1))
@@ -4937,7 +5121,7 @@ generate_taxa_heatmap <- function (data.obj, taxa.levels='Genus', taxa='All', me
 								temp <- 1 + (temp - min(temp)) * s
 								x[x!=0] <- temp
 								x
-								}))
+							}))
 			breaks <- seq(0, ncol(prop), len=ncol(prop)+1)
 		}
 		
@@ -4949,7 +5133,7 @@ generate_taxa_heatmap <- function (data.obj, taxa.levels='Genus', taxa='All', me
 			if (is.null(cexRow)) {
 				cexRow <- ifelse(0.5 * 60 / nrow(prop) > 1, 1, 0.5 * 60 / nrow(prop))
 			}
-
+			
 		}
 		
 		if (is.null(colsep)) {
@@ -4999,6 +5183,9 @@ generate_taxa_heatmap <- function (data.obj, taxa.levels='Genus', taxa='All', me
 		}
 		colnames(colsidecol) <- meta.info
 		
+		# Rev: 2016_09_13
+		colsidecol[is.na(colsidecol)] <- 'white'
+		
 		# add aunbdance key 
 		if (data.type == 'B') {
 			prop.cmap <- list(breaks=c("Absence", "Presence"), colors=c("lightyellow", "red"), base=NA, col.na=NA, right=F, include.lowest=F) 
@@ -5017,9 +5204,9 @@ generate_taxa_heatmap <- function (data.obj, taxa.levels='Genus', taxa='All', me
 		if (data.type == 'R'){
 			KeyName <- 'Rank'
 		}
-			
+		
 		# add row col key
-        if (row.col.dat == 'Phyla') {
+		if (row.col.dat == 'Phyla') {
 			if (LOI %in% c('Class', 'Order', 'Family', 'Genus', 'Species')) {
 				if (LOI == 'Species') {
 					phy <- sapply(strsplit(rownames(prop), ":"), function(x) x[2])
@@ -5048,20 +5235,29 @@ generate_taxa_heatmap <- function (data.obj, taxa.levels='Genus', taxa='All', me
 		
 		pdf(paste0('Taxa_Heatmap_', LOI, '_', ann, '.pdf'), width=width, height=height)
 		par(oma = omas)
-
-		if (data.type == 'R' | data.type == 'B') {
-			dist2 <- dist
-		}
-		if (data.type == 'P') {
-			# Better clustering of taxa
-			dist2 <- function(x) as.dist((1-cor(t(x)))/2)
-		}
-
+		
+#		if (data.type == 'R' | data.type == 'B') {
+#			dist2 <- dist
+#		}
+#		if (data.type == 'P') {
+#			# Better clustering of taxa
+		##			dist2 <- function(x) {    
+		##				as.dist((1-cor(t(x)))/2)
+		##			}
+#	       dist2 <- dist
+#		}
+#
+#		# Rev: 2016_09_13 handle zero sd cases
+#        if (sum(rowSds(prop) == 0) != 0 | sum(colSds(prop) == 0) != 0)  {
+#			dist2 <- dist
+#			warning('Zero sd produced! Euclidean distance is used instead!\n')
+#		}
+		
 		# Pearson correlation distance
-		heatmap.3(prop, 
+		obj <- heatmap.3(prop, 
 				Rowv=Rowv, 
 				Colv=Colv, 
-				distfun = dist2,
+#				distfun = dist2,
 				dendrogram=dendrogram,
 				scale='none',
 				col=col.scheme, 
@@ -5081,18 +5277,19 @@ generate_taxa_heatmap <- function (data.obj, taxa.levels='Genus', taxa='All', me
 				cexCol=cexCol,
 				key=(data.type != 'B'), density.info='none', symkey=F, KeyValueName=KeyName,	
 				NumColSideColors= 0.5 *length(meta.info),
-				NumRowSideColors= 0.5
+				NumRowSideColors= 0.5,
+				...
 		)
-
+		
 		par(cex=0.75)
 		par(oma=c(0, 0, 1, 0)) 
 		
 		if (!is.null(rowsidecol) & row.col.dat == 'Phyla') {
 			y.cord <- (1/(length(meta.info)+2)) * (0:((length(meta.info)+2) - 1))
 			vkey2(phy.cmap, 'Phylum', x=0, y=-0.2, stretch=1.2)
-
+			
 		}
-
+		
 		y.cord <- (1/(length(meta.info))) * (0:(length(meta.info) - 1))
 		k <- 1
 		for (keyID in meta.info) {
@@ -5116,26 +5313,21 @@ generate_taxa_heatmap <- function (data.obj, taxa.levels='Genus', taxa='All', me
 #		}	
 		dev.off()	
 	}
+	if (return.obj == TRUE) {
+		return(obj)
+	}
+	
 }
 
+# Rev: 2016_06_13
 generate_stacked_barplot <- function(data.obj, grp.name=NULL, taxa.levels=c('Phylum', 'Family', 'Genus'), agg.cutoff=0.005, 
-		border=TRUE,
-		hei1=6, wid1=9, hei2=6, wid2=9, margin=10, ann='') {
+		border=TRUE, order.auto=TRUE, cex.names=0.5, separate=FALSE, cex.names2=1, indiv=TRUE, aggre=TRUE,
+		hei1=6, wid1=9, hei2=6, wid2=9, margin=10, ann='', pdf=TRUE, ...) {
 	if (is.null(grp.name)) {
-		grp <- 1:nrow(data.obj$meta.dat)
+		grp <- rep(1, nrow(data.obj$meta.dat))
 	} else {
 		grp <- data.obj$meta.dat[, grp.name]
 	}
-	
-	pdf(paste0("Taxa_Stacked_Barplot_Overall_Compo_", ann, ".pdf"), height=hei1, width=wid1)
-	
-	if (border == FALSE) {
-		lty.o <- par("lty")
-		par(lty = 0)
-	}
-	
-	
-	par(mar=par('mar') + c(0, margin, 0, 0))
 	
 	name.list <- list()
 	col.list <- list()
@@ -5153,74 +5345,165 @@ generate_stacked_barplot <- function(data.obj, grp.name=NULL, taxa.levels=c('Phy
 		#rand.col <- c(sample(rainbow(nrow(prop)*2), nrow(prop)-1), 'gray')
 		rand.col <- c(rep_len(brewer.pal(12, "Paired"), nrow(prop)-1), 'gray')
 		col.list[[taxa.level]] <- rand.col
+	}	
+	
+	if (indiv == TRUE) {
+		if (pdf == TRUE)
+			pdf(paste0("Taxa_Stacked_Barplot_Overall_Compo_", ann, ".pdf"), height=hei1, width=wid1)
 		
-		cex.legend = ifelse (nrow(prop) > 35, 35/nrow(prop)*0.75, 0.75)
-		prop <- prop[, order(grp)]
 		if (border == FALSE) {
-			barplot(prop, col=rand.col, ylab='Proportion', las=2, legend.text=rownames(prop), cex.names=0.5, space=0,
-					args.legend=list(x='left', bty='n',  cex=cex.legend, inset=c(-0.5, 0)), main=taxa.level)
-			par(lty = lty.o)
-		} else {
-			barplot(prop, col=rand.col, ylab='Proportion', las=2, legend.text=rownames(prop), cex.names=0.5,
-					args.legend=list(x='left', bty='n',  cex=cex.legend, inset=c(-0.5, 0)), main=taxa.level)
+			lty.o <- par("lty")
+			par(lty = 0)
+		}
+		
+		mar.o <- par(mar=par('mar') + c(0, margin, 0, 0))
+		
+		for (taxa.level in taxa.levels) {
+			abund0 <- data.obj$abund.list[[taxa.level]]
+			abund0 <- t(t(abund0) / colSums(abund0))
+			
+			abund1 <- abund0[rowMeans(abund0) >= agg.cutoff, , drop=F]
+			abund2 <- abund0[rowMeans(abund0) < agg.cutoff, , drop=F]
+			
+			prop <- rbind(abund1, Other=colSums(abund2))
+			colnames(prop) <- colnames(abund0)
+			
+			#rand.col <- c(sample(rainbow(nrow(prop)*2), nrow(prop)-1), 'gray')
+			#col.list[[taxa.level]] <- rand.col
+			
+			cex.legend = ifelse (nrow(prop) > 35, 35/nrow(prop)*0.75, 0.75)
+			
+			# Rev: 2016_09_13, better ordering within group based on single linkage
+			if (order.auto) {
+				prop <- 	do.call(cbind, tapply(1:length(grp), factor(grp), function(i){
+									if (length(i) >= 2) {
+										prop.sub <- prop[, i, drop=FALSE]
+										# ord <- hclust(dist(t(prop.sub)), method='single')$order
+										temp <- rev(order(rowMeans(prop.sub)))
+										if (length(temp) >=3) {
+											ord <- rev(order(prop.sub[temp[1], ], prop.sub[temp[2], ], prop.sub[temp[3], ]))
+										} else {
+											ord <- rev(order(prop.sub[temp[1], ]))
+										}
+										
+										prop.sub <- prop.sub[, ord, drop=FALSE]
+										return(prop.sub)
+									} else {
+										return(prop[, i, drop=FALSE])
+									}
+								}))
+			} else {
+				prop <- prop[, order(grp), drop=FALSE]
+			}
+			
+			if (border == FALSE) {
+				barplot(prop, col=col.list[[taxa.level]], ylab='Proportion', las=2, legend.text=rownames(prop), cex.names=cex.names, space=0,
+						args.legend=list(x='left', bty='n',  cex=cex.legend, inset=c(-0.5, 0)), main=taxa.level, ...)
+			} else {
+				barplot(prop, col=col.list[[taxa.level]], ylab='Proportion', las=2, legend.text=rownames(prop), cex.names=cex.names,
+						args.legend=list(x='left', bty='n',  cex=cex.legend, inset=c(-0.5, 0)), main=taxa.level, ...)
+				
+			}
 			
 		}
+		if (border == FALSE) {
+			par(lty = lty.o)
+		}
+		
+		par(mar = mar.o)
+		if (pdf == TRUE)
+			dev.off()
 		
 	}
-	dev.off()
 	
 	# Generate averaged over stack barplot
-	cex.legend <- 10
-	if (!is.null(grp.name)) {
-		pdf(paste0("Taxa_Stacked_Barplot_Grouped_Compo_", ann, ".pdf"), height=hei2, width=wid2)
-		
-		par(mar=par('mar') + c(0, margin/length(taxa.levels), 0, 0))
-		par(mfrow=c(1, length(taxa.levels)))
-		for (taxa.level in taxa.levels) {
-			abund0 <- data.obj$abund.list[[taxa.level]]
-			abund0 <- t(t(abund0) / colSums(abund0))
+	
+	if (!is.null(grp.name) & aggre == TRUE) {
+		if (separate != TRUE) {
+			if (pdf == TRUE)
+				pdf(paste0("Taxa_Stacked_Barplot_Grouped_Compo_", ann, "_combine.pdf"), height=hei2, width=wid2)
+			mar.o <- par(mar=par('mar') + c(0, margin/length(taxa.levels), 0, 0))
+			mfrow.o <- par(mfrow=c(1, length(taxa.levels)))
+			cex.legend <- 10
+			for (taxa.level in taxa.levels) {
+				abund0 <- data.obj$abund.list[[taxa.level]]
+				abund0 <- t(t(abund0) / colSums(abund0))
+				
+				abund0 <- t(apply(abund0, 1, function(x) {
+									tapply(x, grp, mean)
+								}))
+				
+				abund1 <- abund0[name.list[[taxa.level]], , drop=FALSE]
+				abund2 <- 1 - colSums(abund1)
+				
+				prop <- rbind(abund1, Other=abund2)
+				colnames(prop) <- colnames(abund0)
+				
+				newsize <- ifelse (nrow(prop) > 35, 35/nrow(prop)*0.75, 0.75)
+				cex.legend <- ifelse(cex.legend < newsize, cex.legend, newsize) 
+				#prop <- prop[, order(grp)]
+				barplot(prop, col=col.list[[taxa.level]], ylab='Proportion', las=2, cex.names=cex.names2, main=taxa.level, ...)
+				#		legend.text=rownames(prop), args.legend=list(x='left', bty='n',  cex=cex.legend, inset=c(-2.2, 0)))
+				
+			}
 			
-			abund0 <- t(apply(abund0, 1, function(x) {
-								tapply(x, grp, mean)
-							}))
+			par(mar=c(0, 0, 0, 0))
+			oma.o <- par(oma=c(0, 0, 0, 0))
+			for (taxa.level in taxa.levels) {
+				abund0 <- data.obj$abund.list[[taxa.level]]
+				abund0 <- t(t(abund0) / colSums(abund0))
+				
+				abund0 <- t(apply(abund0, 1, function(x) {
+									tapply(x, grp, mean)
+								}))
+				
+				abund1 <- abund0[name.list[[taxa.level]], , drop=FALSE]
+				abund2 <- 1 - colSums(abund1)
+				
+				prop <- rbind(abund1, Other=abund2)
+				colnames(prop) <- colnames(abund0)
+				
+				#	cex.legend = ifelse (nrow(prop) > 35, 35/nrow(prop)*0.75, 0.75)
+				plot(1, type="n", axes=FALSE, xlab="", ylab="")
+				# Rev: 2016_09_10
+				legend('left', legend=rev(rownames(prop)), bty='n', fill=rev(col.list[[taxa.level]]), cex=cex.legend)
+				
+			}
+			par(mar=mar.o)
+			par(oma=oma.o)
+			par(mfrow=mfrow.o)
+			if (pdf == TRUE)
+				dev.off()
+		} else {
+			if (pdf == TRUE)
+				pdf(paste0("Taxa_Stacked_Barplot_Grouped_Compo_", ann, "_Separate.pdf"), height=hei2, width=wid2)
 			
-			abund1 <- abund0[name.list[[taxa.level]], ]
-			abund2 <- 1 - colSums(abund1)
-			
-			prop <- rbind(abund1, Other=abund2)
-			colnames(prop) <- colnames(abund0)
-			
-			newsize <- ifelse (nrow(prop) > 35, 35/nrow(prop)*0.75, 0.75)
-			cex.legend <- ifelse(cex.legend < newsize, cex.legend, newsize) 
-			#prop <- prop[, order(grp)]
-			barplot(prop, col=col.list[[taxa.level]], ylab='Proportion', las=2, cex.names=1, main=taxa.level)
-			#		legend.text=rownames(prop), args.legend=list(x='left', bty='n',  cex=cex.legend, inset=c(-2.2, 0)))
+			mar.o <- par(mar=par('mar') + c(0, margin, 0, 0))
+			for (taxa.level in taxa.levels) {
+				abund0 <- data.obj$abund.list[[taxa.level]]
+				abund0 <- t(t(abund0) / colSums(abund0))
+				
+				abund0 <- t(apply(abund0, 1, function(x) {
+									tapply(x, grp, mean)
+								}))
+				
+				abund1 <- abund0[name.list[[taxa.level]], , drop=FALSE]
+				abund2 <- 1 - colSums(abund1)
+				
+				prop <- rbind(abund1, Other=abund2)
+				colnames(prop) <- colnames(abund0)
+				
+				cex.legend <- ifelse (nrow(prop) > 35, 35/nrow(prop)*0.75, 0.75)
+				barplot(prop, col=col.list[[taxa.level]], ylab='Proportion', las=2, cex.names=cex.names2, main=taxa.level,
+						legend.text=rownames(prop), args.legend=list(x='left', bty='n',  cex=cex.legend, inset=c(-0.5, 0)), ...)
+				
+			}
+			par(mar=mar.o)
+			if (pdf == TRUE)
+				dev.off()
 			
 		}
 		
-		par(mar=c(0, 0, 0, 0))
-		par(oma=c(0, 0, 0, 0))
-		for (taxa.level in taxa.levels) {
-			abund0 <- data.obj$abund.list[[taxa.level]]
-			abund0 <- t(t(abund0) / colSums(abund0))
-			
-			abund0 <- t(apply(abund0, 1, function(x) {
-								tapply(x, grp, mean)
-							}))
-			
-			abund1 <- abund0[name.list[[taxa.level]], ]
-			abund2 <- 1 - colSums(abund1)
-			
-			prop <- rbind(abund1, Other=abund2)
-			colnames(prop) <- colnames(abund0)
-			
-			#	cex.legend = ifelse (nrow(prop) > 35, 35/nrow(prop)*0.75, 0.75)
-			#prop <- prop[, order(grp)]
-			plot(1, type="n", axes=FALSE, xlab="", ylab="")
-			legend('left', legend=rownames(prop), bty='n', fill=col.list[[taxa.level]], cex=cex.legend)
-			
-		}
-		dev.off()
 	}
 	
 }
@@ -5239,18 +5522,18 @@ build.decision.tree <- function(data.obj,  resp.name, taxa.level='Species', bina
 	dat <- as.data.frame(t(prop))
 	dat <- data.frame(dat, response)
 	try(
-		if (is.factor(response)) {
-			fit <- rpart(response ~ ., method="class", data=dat)
-			post(fit, file = paste0("Taxa_Unpruned_Classification_tree_", ann, ".ps"), title = "Unpruned Classification Tree")
-			pfit<- prune(fit, cp= fit$cptable[which.min(fit$cptable[,"xerror"]),"CP"])
-			post(pfit, file = paste0("Taxa_Pruned_Classification_", ann, ".ps"), title = "Pruned Classification Tree")
-			
-		} else {
-			fit <- rpart(response ~ ., method="anova", data=dat)
-			post(fit, file = paste0("Taxa_Unpruned_Regression_tree_", ann, ".ps"), title = "Unpruned Regression Tree")
-			pfit<- prune(fit, cp= fit$cptable[which.min(fit$cptable[,"xerror"]),"CP"])
-			post(pfit, file = paste0("Taxa_Pruned_Regression_tree_", ann, ".ps"), title = "Pruned RegressionTree")
-		}
+			if (is.factor(response)) {
+						fit <- rpart(response ~ ., method="class", data=dat)
+						post(fit, file = paste0("Taxa_Unpruned_Classification_tree_", ann, ".ps"), title = "Unpruned Classification Tree")
+						pfit<- prune(fit, cp= fit$cptable[which.min(fit$cptable[,"xerror"]),"CP"])
+						post(pfit, file = paste0("Taxa_Pruned_Classification_", ann, ".ps"), title = "Pruned Classification Tree")
+						
+					} else {
+						fit <- rpart(response ~ ., method="anova", data=dat)
+						post(fit, file = paste0("Taxa_Unpruned_Regression_tree_", ann, ".ps"), title = "Unpruned Regression Tree")
+						pfit<- prune(fit, cp= fit$cptable[which.min(fit$cptable[,"xerror"]),"CP"])
+						post(pfit, file = paste0("Taxa_Pruned_Regression_tree_", ann, ".ps"), title = "Pruned RegressionTree")
+					}
 	)	
 }
 
@@ -5263,15 +5546,15 @@ bootstrap.pwr <- function(pcs, formula, dat, ns=NULL, perm.no=199, iter.no=100) 
 	for (n in ns) {
 		cat('.')
 		temp <- sapply(1:iter.no, function(i) {
-			bt.ind <- sample(1:nrow(dat), n, repl=T)
-			dat.bt <- dat[bt.ind, ]
-			dist.bt <- dist(pcs[bt.ind, ])
-			aov.tab <- adonis(as.formula(paste('dist.bt', formula)), dat=dat.bt, permutations=perm.no)$aov.tab
-	        pv <- aov.tab[nrow(aov.tab)-2, ncol(aov.tab)]
-		})
-        pvs[paste(n)] <- mean(temp <= 0.05)
+					bt.ind <- sample(1:nrow(dat), n, repl=T)
+					dat.bt <- dat[bt.ind, ]
+					dist.bt <- dist(pcs[bt.ind, ])
+					aov.tab <- adonis(as.formula(paste('dist.bt', formula)), dat=dat.bt, permutations=perm.no)$aov.tab
+					pv <- aov.tab[nrow(aov.tab)-2, ncol(aov.tab)]
+				})
+		pvs[paste(n)] <- mean(temp <= 0.05)
 	}
-
+	
 	return(pvs)
 }
 
@@ -5286,7 +5569,7 @@ perform_power_analysis <- function (data.obj, dist.obj, dist.names=c('UniFrac', 
 		}
 	}	 
 	df <- data.obj$meta.dat
-    pvm <- NULL
+	pvm <- NULL
 	for (dist.name in dist.names) {
 		cat('*')
 		dist.mat <- dist.obj[[dist.name]]
@@ -5301,14 +5584,181 @@ perform_power_analysis <- function (data.obj, dist.obj, dist.names=c('UniFrac', 
 	colnames(pvdf) <- c('Distance_type', 'Sample_size', 'Value')
 	pdf(paste0("Power_curve_bootstrap_", ann, '.pdf')) 
 	g.obj <- ggplot(pvdf, aes(x=Sample_size, y=Value)) +
-				geom_point() +
-				geom_line() +
-				ylab('Power') +
-				facet_wrap(~ Distance_type, ncol=2) +
-				theme_bw()
+			geom_point() +
+			geom_line() +
+			ylab('Power') +
+			facet_wrap(~ Distance_type, ncol=2) +
+			theme_bw()
 	print(g.obj)
 	dev.off()
 	
 	return(pvdf)
 }
 
+# More robust identification
+k.nonoverlap.se <- function (tab, SE.factor=1) {
+	max.v <- which.max(tab[, 'gap']) 
+	
+	for (i in (max.v-1):1) {
+		if (tab[i, 'gap'] + SE.factor * tab[i, 'SE.sim'] < tab[i+1, 'gap'] - SE.factor * tab[i+1, 'SE.sim']) {
+			break
+		} 
+	}
+	
+	return(i+1)
+}
+
+
+perform_cluster_analysis <- function (data.obj, dist.obj, dist.name=c('UniFrac'), k.best=NULL, method='pam', stat='gap', 
+		grp.name=NULL, adj.name=NULL, subject=NULL, ann='', seed=1234) {
+	
+	df <- data.obj$meta.dat
+	if (!is.null(grp.name)) {
+		grp <- df[, grp.name]
+	}
+	if (!is.null(adj.name)) {
+		adj <- df[, adj.name]
+	}
+	cat(dist.name, ' distance ...\n')
+	mat <- dist.obj[[dist.name]]
+	
+	if (is.null(k.best)) {
+		pc.obj <- cmdscale(as.dist(mat), k=ncol(mat) - 1, eig=T)
+		eig <- pc.obj$eig
+		eig <- eig[eig > 0]
+		pvar <- eig / sum(eig)
+		pc <- pc.obj$points
+		
+		cat('Assess cluster number by gap statistics ...\n')
+		
+		set.seed(seed)
+		gs <-  gapstat_ord(pc, axes=1:ncol(pc), verbose=FALSE)
+		plot_clusgap(gs)
+		ggsave(paste0('cluster_assess_gap_statistic_', dist.name, ann, '.pdf') , width=6, height=6)
+		
+		
+#		print(gs, method="Tibs2001SEmax")
+#		print(gs, method="firstSEmax")
+		
+		tab <- gs$Tab
+		write.csv(tab, paste0('gap_stat_', dist.name, '.csv'))
+		
+		k.best.gap <- k.nonoverlap.se(tab)
+		
+		cat('Gap statistic finds ', k.best.gap, ' clusters.\n')
+		
+		
+		cat('Assess cluster number by average silhouette width ...\n')
+		asw <- numeric(20)
+		for (k in 2:20){
+			asw[k] <- pam(as.dist(mat), k)$silinfo$avg.width
+		}
+		
+		k.best.asw <- which.max(asw)
+		cat("silhouette-optimal number of clusters:", k.best.asw, "\n")
+		pdf(paste0('cluster_assess_asw_statistic_', dist.name, ann, '.pdf'), width=6, height=6)
+		plot(1:20, asw, type= "h", main = "pam() clustering assessment",
+				xlab= "k (# clusters)", ylab = "average silhouette width")
+		axis(1, k.best.asw, paste("best",k.best.asw, sep="\n"), col = "red", col.axis = "red")
+		dev.off()
+		
+		cat('ASW statistic finds ', k.best.asw, ' clusters.\n')
+		
+		if (stat == 'gap') {
+			k.best <- k.best.gap
+		} else {
+			if (stat == 'asw') {
+				k.best <- k.best.asw
+			}
+		}
+		
+	}
+	
+	if (k.best == 1) {
+		cat('No robust cluster structure found!\n')
+	} else {
+		pam.obj <- pam(as.dist(mat), k=k.best)
+		pam.class <- factor(pam.obj$clustering)
+		write.csv(pam.class, paste0('Cluster.membership', dist.name, '.csv'))
+		
+		df$Cluster <- pam.class
+		data.obj$meta.dat <- df
+		if (is.null(grp.name)) {
+			generate_ordination(data.obj, dist.obj, dist.name, grp.name='Cluster', ann=paste0('Cluster', dist.name, ann))
+		} else {
+			generate_ordination(data.obj, dist.obj, dist.name, grp.name='Cluster', strata=grp.name, ann=paste0('Cluster', dist.name, ann))
+		}
+		
+		# Define cluster characteristics
+		diff.obj <- perform_differential_analysis(data.obj, grp.name='Cluster', 
+				taxa.levels=c('Genus'),
+				method='kruskal', mt.method='fdr', 
+				cutoff=0.01, prev=0.1, minp=0.002, ann='Cluster')
+		
+		visualize_differential_analysis(data.obj, diff.obj, grp.name='Cluster', taxa.levels=c('Genus'), indivplot=FALSE,
+				mt.method='fdr', cutoff=0.01, ann='Cluster')
+		
+		try(
+				if (!is.null(grp.name)) {
+					if (is.null(adj.name)) {
+						form <- as.formula(paste('yy ~', grp.name))
+					} else {
+						form <- as.formula(paste('yy ~', paste(adj.name, collapse='+'), '+', grp.name))		
+					}
+					# Enrichment analysis - logistic regression - 1 vs other
+					cat('Testing for association with the clusters - 1 vs other ...\n')
+					sink(paste0('Cluster_association_test', dist.name, ann, '.txt'))
+					if (is.null(subject)) {
+						cat('Generalized linear model (logistic regression) is performed.\n')
+						
+						for (clus in levels(df$Cluster)[1:(nlevels(df$Cluster))]) {	
+							cat('Test for enrichment in cluster', clus, '\n')
+							y <- rep(0, length(df$Cluster)) 
+							y[df$Cluster == clus] <- 1
+							df$yy <- y
+							prmatrix(summary(glm(form, data=df, family=binomial))$coefficients)	
+						}
+					} else {
+						cat('Generalized linear mixed effects model (logistic regression) is performed.\n')
+						for (clus in levels(df$Cluster)[1:(nlevels(df$Cluster))]) {
+							cat('Test for enrichment in cluster', clus, '\n')
+							y <- rep(0, length(df$Cluster)) 
+							y[df$Cluster == clus] <- 1
+							df$yy <- y
+							prmatrix(summary(glmmPQL(form, data=df, random = as.formula(paste0('~ 1|', subject)), family=binomial, verbose=F))$tTable)
+							
+						}
+					}
+					sink()
+				}
+		)
+		
+	}
+}
+
+
+##########
+B2M <- function(x) {
+	x[x==0] <- min(x[x!=0])
+	x[x==1] <- max(x[x!=1])
+	log(x / (1-x))
+}
+
+
+fastDist <- function(X) {
+	temp <- colSums(X^2)  
+	D <- outer(temp, temp, "+") - 2 * t(X) %*% X
+	diag(D) <- 0
+	sqrt(D)
+}
+
+fastLM <- function(Y, M) {
+	Y <- as.matrix(Y)
+	XXI <- solve(t(M) %*% M)
+	dof <- ncol(Y) - ncol(M)
+	est <- XXI %*% t(M) %*% t(Y)
+	resid <- t(Y) - M %*% est
+	sigma <- sqrt(colSums(resid^2)/dof)
+	Pvec <- 2*pt(-abs(t(est/(sqrt(diag(XXI))))/sigma), dof)
+	return(Pvec)
+}
